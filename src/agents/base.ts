@@ -106,6 +106,56 @@ function replacePlaceholders(template: string[], values: Record<string, string>)
   });
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function extractNestedContentCandidate(data: unknown): string | undefined {
+  if (typeof data === "string") {
+    return data;
+  }
+
+  if (Array.isArray(data)) {
+    for (let index = data.length - 1; index >= 0; index -= 1) {
+      const candidate = extractNestedContentCandidate(data[index]);
+      if (candidate) {
+        return candidate;
+      }
+    }
+    return undefined;
+  }
+
+  if (!isPlainObject(data)) {
+    return undefined;
+  }
+
+  const directKeys = ["finalMessage", "content", "text", "message"];
+  for (const key of directKeys) {
+    if (typeof data[key] === "string" && data[key].trim().length > 0) {
+      return data[key] as string;
+    }
+  }
+
+  if (Array.isArray(data.messages)) {
+    for (let index = data.messages.length - 1; index >= 0; index -= 1) {
+      const message = data.messages[index];
+      if (typeof message === "string" && message.trim().length > 0) {
+        return message;
+      }
+    }
+  }
+
+  const nestedKeys = ["data", "item", "result"];
+  for (const key of nestedKeys) {
+    const candidate = extractNestedContentCandidate(data[key]);
+    if (candidate) {
+      return candidate;
+    }
+  }
+
+  return undefined;
+}
+
 export abstract class ConfigurableCliAgentAdapter implements AgentAdapter {
   public readonly capabilities: AgentCapability;
   private cachedDetection?: AgentDetectionResult;
@@ -258,7 +308,10 @@ export abstract class ConfigurableCliAgentAdapter implements AgentAdapter {
     let fallback: StructuredParseResult | undefined;
 
     for (const candidate of candidates) {
-      const parsed = parseStructuredOutput(candidate);
+      const parsed = this.promoteNestedStructuredParse(
+        parseStructuredOutput(candidate),
+        candidate
+      );
       if (parsed.format !== "raw") {
         return parsed;
       }
@@ -267,6 +320,37 @@ export abstract class ConfigurableCliAgentAdapter implements AgentAdapter {
     }
 
     return fallback;
+  }
+
+  private promoteNestedStructuredParse(
+    parsed: StructuredParseResult,
+    originalRawText: string
+  ): StructuredParseResult {
+    const nestedCandidate = extractNestedContentCandidate(parsed.data);
+    if (!nestedCandidate) {
+      return parsed;
+    }
+
+    const trimmedNested = nestedCandidate.trim();
+    if (!trimmedNested || trimmedNested === originalRawText.trim()) {
+      return parsed;
+    }
+
+    const nestedParsed = parseStructuredOutput(trimmedNested);
+    if (nestedParsed.format === "raw") {
+      return parsed;
+    }
+
+    return {
+      format: nestedParsed.format,
+      data: nestedParsed.data,
+      rawText: originalRawText,
+      extractionNotes: [
+        ...parsed.extractionNotes,
+        `Extracted nested structured payload from ${parsed.format} envelope.`,
+        ...nestedParsed.extractionNotes
+      ]
+    };
   }
 
   public async run(input: AgentRunInput): Promise<AgentRunResult> {
