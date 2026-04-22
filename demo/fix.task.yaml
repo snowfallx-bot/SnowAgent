@@ -1,0 +1,12 @@
+type: fix
+title: Demo fix task
+promptFile: ./bug.txt
+cwd: ..
+preferredAgent: codex
+fallbackAgents:
+  - qwen
+  - copilot
+timeoutMs: 60000
+metadata:
+  demo: true
+  source: bug.txt

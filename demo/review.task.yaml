@@ -1,0 +1,12 @@
+type: review
+title: Demo review task
+promptFile: ./review.diff.txt
+cwd: ..
+preferredAgent: codex
+fallbackAgents:
+  - copilot
+  - qwen
+timeoutMs: 60000
+metadata:
+  demo: true
+  source: review.diff.txt

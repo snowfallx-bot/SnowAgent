@@ -1,0 +1,12 @@
+type: summarize
+title: Demo summarize task
+promptFile: ./issue.txt
+cwd: ..
+preferredAgent: auto
+fallbackAgents:
+  - qwen
+  - codex
+timeoutMs: 60000
+metadata:
+  demo: true
+  source: issue.txt

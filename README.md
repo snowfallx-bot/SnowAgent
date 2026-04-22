@@ -135,6 +135,7 @@ node .\dist\cli\index.js doctor --agent qwen --smoke --fail-on-unhealthy
 node .\dist\cli\index.js route --task review --agent codex --cwd . --detect --json
 node .\dist\cli\index.js prompt --task summarize --input-file .\demo\issue.txt --cwd . --json
 node .\dist\cli\index.js history --kind preview --limit 5 --json
+node .\dist\cli\index.js run --task-file .\demo\summarize.task.yaml --dry-run --json
 ```
 
 5. 再跑 demo：
@@ -149,6 +150,7 @@ node .\dist\cli\index.js run --task fix --input-file .\demo\bug.txt --cwd . --ag
 
 ```powershell
 node .\dist\cli\index.js run --task summarize --input-file .\demo\issue.txt --cwd . --dry-run --json
+node .\dist\cli\index.js run --task-file .\demo\summarize.task.yaml --dry-run --json
 ```
 
 ## 配置说明
@@ -197,6 +199,33 @@ agents:
         - --cd
         - "{cwd}"
 ```
+
+### 任务文件
+
+除了直接传 `--task/--prompt/--input-file`，`route`、`prompt` 和 `run` 也支持通过 `--task-file` 读取完整任务定义。
+
+支持 JSON 和 YAML，常见字段如下：
+
+```yaml
+type: summarize
+title: Demo summarize task
+promptFile: ./issue.txt
+cwd: ..
+preferredAgent: auto
+fallbackAgents:
+  - qwen
+  - codex
+timeoutMs: 60000
+metadata:
+  source: issue.txt
+```
+
+说明：
+
+- `prompt` 和 `promptFile` 二选一
+- `promptFile`、`cwd` 都按任务文件所在目录解析相对路径
+- CLI 显式参数会覆盖任务文件中的同名字段
+- 仓库已提供 `demo/*.task.yaml` 作为样例
 
 ### 为什么不能硬编码 CLI 参数
 
@@ -297,6 +326,7 @@ node .\dist\cli\index.js doctor --agent qwen --smoke --fail-on-unhealthy
 ```powershell
 node .\dist\cli\index.js route --task review --cwd .
 node .\dist\cli\index.js route --task fix --agent codex --fallback qwen copilot --cwd . --detect --json
+node .\dist\cli\index.js route --task-file .\demo\review.task.yaml --detect --json
 ```
 
 适合用来排查：
@@ -312,6 +342,7 @@ node .\dist\cli\index.js route --task fix --agent codex --fallback qwen copilot 
 ```powershell
 node .\dist\cli\index.js prompt --task summarize --input-file .\demo\issue.txt --cwd .
 node .\dist\cli\index.js prompt --task review --input-file .\demo\review.diff.txt --cwd . --json
+node .\dist\cli\index.js prompt --task-file .\demo\summarize.task.yaml --json
 ```
 
 这个命令适合：
@@ -344,6 +375,7 @@ node .\dist\cli\index.js history --kind run --limit 10
 node .\dist\cli\index.js run --task summarize --input-file .\demo\issue.txt --cwd .
 node .\dist\cli\index.js run --task review --prompt "review this diff" --agent codex --cwd .
 node .\dist\cli\index.js run --task fix --input-file .\demo\bug.txt --agent auto --cwd . --dry-run
+node .\dist\cli\index.js run --task-file .\demo\fix.task.yaml --dry-run --json
 ```
 
 可用参数：
