@@ -125,6 +125,7 @@ node .\dist\cli\index.js detect --json
 ```powershell
 node .\dist\cli\index.js doctor --json
 node .\dist\cli\index.js doctor --agent copilot --smoke --json
+node .\dist\cli\index.js doctor --agent qwen --smoke --fail-on-unhealthy
 ```
 
 5. 再跑 demo：
@@ -261,11 +262,14 @@ qwen -h
 - 探测结果
 - 当前 run 预设
 - 可选 smoke-run 结果
+- 总体健康状态与汇总计数
+- 自动落盘的 doctor 报告路径
 
 ```powershell
 node .\dist\cli\index.js doctor
 node .\dist\cli\index.js doctor --json
 node .\dist\cli\index.js doctor --agent copilot --smoke --json
+node .\dist\cli\index.js doctor --agent qwen --smoke --fail-on-unhealthy
 ```
 
 这个命令适合在真正跑任务前做一次“体检”：
@@ -273,6 +277,7 @@ node .\dist\cli\index.js doctor --agent copilot --smoke --json
 - `detect` 只回答“命令在不在”
 - `doctor` 会进一步告诉你“当前配置准备怎么调用它”
 - 加 `--smoke` 后，还能直接验证 non-interactive 组合是不是当前机器真能跑
+- 加 `--fail-on-unhealthy` 后，可以直接把 `doctor` 当成 CI / 脚本的健康检查入口
 
 ### `run`
 
@@ -337,6 +342,7 @@ PromptBuilder 会要求 agent 输出：
 默认会在 `artifacts/` 下写出：
 
 - `session-*.log`
+- `doctor/*.json`
 - `<task-id>-<timestamp>/task-prompt.txt`
 - `<task-id>-<timestamp>/<agent>-result.json`
 - `<task-id>-<timestamp>/orchestration-result.json`

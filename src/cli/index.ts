@@ -176,6 +176,10 @@ program
   .option("--cwd <path>", "Base working directory.", process.cwd())
   .option("--agent <name>", `Limit to one agent: ${AGENT_NAMES.join(", ")}`)
   .option("--smoke", "Run a real non-interactive smoke prompt for each selected agent.")
+  .option(
+    "--fail-on-unhealthy",
+    "Exit with code 1 when doctor reports warning/unhealthy status."
+  )
   .option("--timeout-ms <ms>", "Smoke test timeout override.")
   .option("--json", "Print JSON output.")
   .action(async (options: {
@@ -183,6 +187,7 @@ program
     cwd: string;
     agent?: string;
     smoke?: boolean;
+    failOnUnhealthy?: boolean;
     timeoutMs?: string;
     json?: boolean;
   }) => {
@@ -199,11 +204,24 @@ program
 
     if (options.json) {
       printJson(report);
+      if (options.failOnUnhealthy && report.summary.status !== "healthy") {
+        process.exitCode = 1;
+      }
       return;
     }
 
+    console.log(`status: ${report.summary.status}`);
+    console.log(
+      `summary: healthy=${report.summary.healthyAgents} warning=${report.summary.warningAgents} unhealthy=${report.summary.unhealthyAgents} available=${report.summary.availableAgents} unavailable=${report.summary.unavailableAgents} smokeFailures=${report.summary.smokeFailures}`
+    );
+    if (report.artifactPath) {
+      console.log(`artifactPath: ${report.artifactPath}`);
+    }
+
     for (const agent of report.agents) {
-      console.log(`${agent.agentName}: ${agent.detection.available ? "available" : "unavailable"}`);
+      console.log(
+        `${agent.agentName}: ${agent.status} (${agent.detection.available ? "available" : "unavailable"})`
+      );
       console.log(`  enabled: ${agent.enabled}`);
       console.log(`  defaultArgs: ${agent.runPreset.defaultArgs.join(" ") || "(none)"}`);
       console.log(`  inputModes: ${agent.runPreset.inputModePriority.join(", ")}`);
@@ -216,6 +234,9 @@ program
       for (const note of agent.detection.notes) {
         console.log(`  detectNote: ${note}`);
       }
+      for (const reason of agent.reasons) {
+        console.log(`  reason: ${reason}`);
+      }
       if (agent.smoke) {
         console.log(
           `  smoke: ${agent.smoke.success ? "success" : "failed"} exitCode=${agent.smoke.exitCode} timedOut=${agent.smoke.timedOut} durationMs=${agent.smoke.durationMs}`
@@ -227,6 +248,10 @@ program
       for (const note of agent.runPreset.notes) {
         console.log(`  note: ${note}`);
       }
+    }
+
+    if (options.failOnUnhealthy && report.summary.status !== "healthy") {
+      process.exitCode = 1;
     }
   });
 
