@@ -65,6 +65,8 @@ describe("Doctor", () => {
           return new FakeAdapter("copilot", {
             available: true,
             executable: "copilot.exe",
+            versionText: "1.0.0",
+            helpText: "help",
             detectedInputModes: ["args"],
             notes: ["ok"]
           });
@@ -86,7 +88,16 @@ describe("Doctor", () => {
     expect(report.agents[0]?.detection.executable).toBe("copilot.exe");
     expect(report.agents[0]?.runPreset.inputModePriority).toEqual(["args"]);
     expect(report.agents[0]?.smoke).toBeUndefined();
+    expect(report.agents[0]?.recommendedActions).toEqual([
+      {
+        category: "smoke",
+        message:
+          "Run a smoke test for copilot to validate the current non-interactive preset on this machine.",
+        command: "node .\\dist\\cli\\index.js doctor --agent copilot --smoke --json"
+      }
+    ]);
     expect(report.artifactPath).toBeUndefined();
+    expect(report.summary.recommendedActions).toEqual(report.agents[0]?.recommendedActions);
   });
 
   it("runs smoke tests for available adapters when requested", async () => {
@@ -100,6 +111,8 @@ describe("Doctor", () => {
             {
               available: true,
               executable: "codex.cmd",
+              versionText: "1.0.0",
+              helpText: "help",
               detectedInputModes: ["stdin"],
               notes: []
             },
@@ -150,6 +163,7 @@ describe("Doctor", () => {
     });
     expect(report.agents[0]?.status).toBe("healthy");
     expect(report.summary.smokeFailures).toBe(0);
+    expect(report.agents[0]?.recommendedActions).toEqual([]);
   });
 
   it("writes doctor artifacts and marks failed smoke runs unhealthy", async () => {
@@ -163,6 +177,8 @@ describe("Doctor", () => {
             {
               available: true,
               executable: "qwen.cmd",
+              versionText: "1.0.0",
+              helpText: "help",
               detectedInputModes: ["args"],
               notes: []
             },
@@ -178,7 +194,20 @@ describe("Doctor", () => {
               logs: [],
               attemptCount: 2,
               commandLine: "qwen.cmd prompt",
-              inputMode: "args"
+              inputMode: "args",
+              parsed: {
+                format: "json",
+                data: [
+                  {
+                    error: {
+                      message:
+                        "No auth type is selected. Please configure an auth type before running in non-interactive mode."
+                    }
+                  }
+                ],
+                rawText: "raw",
+                extractionNotes: []
+              }
             }
           );
         }
@@ -200,6 +229,13 @@ describe("Doctor", () => {
     expect(report.agents[0]?.reasons).toContain(
       "Smoke test failed with exitCode=1 timedOut=false."
     );
+    expect(report.agents[0]?.recommendedActions).toEqual([
+      {
+        category: "auth",
+        message: "Configure authentication for qwen before running it in non-interactive mode.",
+        command: "qwen auth"
+      }
+    ]);
     expect(report.artifactPath).toBeDefined();
     expect(report.artifactPath && fs.existsSync(report.artifactPath)).toBe(true);
 

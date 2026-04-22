@@ -15,6 +15,20 @@ export interface DoctorOptions {
 }
 
 export type DoctorHealthStatus = "healthy" | "warning" | "unhealthy";
+export type DoctorActionCategory =
+  | "availability"
+  | "auth"
+  | "config"
+  | "probe"
+  | "smoke"
+  | "timeout";
+
+export interface DoctorAction {
+  category: DoctorActionCategory;
+  message: string;
+  command?: string;
+  configPath?: string;
+}
 
 export interface DoctorSmokeResult {
   success: boolean;
@@ -33,6 +47,7 @@ export interface DoctorAgentReport {
   enabled: boolean;
   status: DoctorHealthStatus;
   reasons: string[];
+  recommendedActions: DoctorAction[];
   detection: AgentDetectionResult;
   runPreset: {
     defaultArgs: string[];
@@ -54,6 +69,7 @@ export interface DoctorSummary {
   availableAgents: number;
   unavailableAgents: number;
   smokeFailures: number;
+  recommendedActions: DoctorAction[];
 }
 
 export interface DoctorReport {
@@ -67,6 +83,10 @@ export interface DoctorReport {
 
 function sanitizePathToken(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]/gu, "-");
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function buildSmokePrompt(agentName: AgentName): string {
@@ -97,8 +117,193 @@ function toSmokeResult(result: AgentRunResult): DoctorSmokeResult {
   };
 }
 
+function extractStructuredErrorMessage(data: unknown): string | undefined {
+  if (typeof data === "string" && data.trim().length > 0) {
+    return data.trim();
+  }
+
+  if (Array.isArray(data)) {
+    for (const item of data) {
+      const message = extractStructuredErrorMessage(item);
+      if (message) {
+        return message;
+      }
+    }
+    return undefined;
+  }
+
+  if (!isPlainObject(data)) {
+    return undefined;
+  }
+
+  if (typeof data.message === "string" && data.message.trim().length > 0) {
+    return data.message.trim();
+  }
+
+  if (isPlainObject(data.error)) {
+    const nested = extractStructuredErrorMessage(data.error);
+    if (nested) {
+      return nested;
+    }
+  }
+
+  for (const key of ["data", "result", "details"]) {
+    const nested = extractStructuredErrorMessage(data[key]);
+    if (nested) {
+      return nested;
+    }
+  }
+
+  return undefined;
+}
+
+function buildSmokeCommand(agentName: AgentName): string {
+  return `node .\\dist\\cli\\index.js doctor --agent ${agentName} --smoke --json`;
+}
+
+function buildAvailabilityActions(agentName: AgentName): DoctorAction[] {
+  return [
+    {
+      category: "availability",
+      message: `Install or expose the ${agentName} CLI on PATH, or point the config to the correct executable path.`,
+      command: `where ${agentName}`,
+      configPath: `agents.${agentName}.executablePath`
+    },
+    {
+      category: "config",
+      message: `Review the configured command candidates for ${agentName} if the binary name differs on this machine.`,
+      configPath: `agents.${agentName}.commandCandidates`
+    }
+  ];
+}
+
+function buildProbeActions(agentName: AgentName, detection: AgentDetectionResult): DoctorAction[] {
+  const actions: DoctorAction[] = [];
+
+  if (!detection.versionText) {
+    actions.push({
+      category: "probe",
+      message: `No version probe returned output for ${agentName}; consider adjusting the configured version probe args.`,
+      configPath: `agents.${agentName}.detect.versionArgs`
+    });
+  }
+
+  if (!detection.helpText) {
+    actions.push({
+      category: "probe",
+      message: `No help probe returned output for ${agentName}; consider adjusting the configured help probe args.`,
+      configPath: `agents.${agentName}.detect.helpArgs`
+    });
+  }
+
+  return actions;
+}
+
+function buildSmokeFailureActions(
+  agentName: AgentName,
+  smoke: DoctorSmokeResult
+): DoctorAction[] {
+  const actions: DoctorAction[] = [];
+  const structuredMessage = extractStructuredErrorMessage(smoke.parsedData);
+  const combinedMessage = [structuredMessage, smoke.stderr]
+    .filter((value): value is string => Boolean(value && value.trim()))
+    .join(" ")
+    .trim();
+  const normalizedMessage = combinedMessage.toLowerCase();
+
+  if (smoke.timedOut) {
+    actions.push({
+      category: "timeout",
+      message: `Smoke test for ${agentName} timed out; increase --timeout-ms or the agent timeout in config before relying on it.`,
+      configPath: `agents.${agentName}.timeoutMs`
+    });
+  }
+
+  if (normalizedMessage.includes("auth")) {
+    actions.push({
+      category: "auth",
+      message: `Configure authentication for ${agentName} before running it in non-interactive mode.`,
+      command: agentName === "qwen" ? "qwen auth" : undefined
+    });
+  }
+
+  if (normalizedMessage.includes("allow-all-tools")) {
+    actions.push({
+      category: "config",
+      message: `The ${agentName} CLI rejected the current non-interactive permission preset; review the configured nonInteractiveArgs.`,
+      configPath: `agents.${agentName}.run.nonInteractiveArgs`
+    });
+  }
+
+  if (actions.length === 0) {
+    actions.push({
+      category: "smoke",
+      message: `Re-run the smoke test for ${agentName} with JSON output and inspect stderr/parsedData for the exact failure.`,
+      command: buildSmokeCommand(agentName)
+    });
+  }
+
+  return actions;
+}
+
+function buildAgentActions(
+  report: Omit<DoctorAgentReport, "status" | "reasons" | "recommendedActions">,
+  smokeEnabled: boolean
+): DoctorAction[] {
+  const actions: DoctorAction[] = [];
+
+  if (!report.enabled) {
+    actions.push({
+      category: "config",
+      message: `Enable ${report.agentName} in config if you want the router and doctor to consider it.`,
+      configPath: `agents.${report.agentName}.enabled`
+    });
+    return actions;
+  }
+
+  if (!report.detection.available) {
+    actions.push(...buildAvailabilityActions(report.agentName));
+    return actions;
+  }
+
+  actions.push(...buildProbeActions(report.agentName, report.detection));
+
+  if (!smokeEnabled) {
+    actions.push({
+      category: "smoke",
+      message: `Run a smoke test for ${report.agentName} to validate the current non-interactive preset on this machine.`,
+      command: buildSmokeCommand(report.agentName)
+    });
+    return actions;
+  }
+
+  if (report.smoke && !report.smoke.success) {
+    actions.push(...buildSmokeFailureActions(report.agentName, report.smoke));
+  }
+
+  return actions;
+}
+
+function buildSummaryActions(reports: DoctorAgentReport[]): DoctorAction[] {
+  const seen = new Set<string>();
+  const actions: DoctorAction[] = [];
+
+  for (const report of reports) {
+    for (const action of report.recommendedActions) {
+      const key = `${action.category}|${action.message}|${action.command ?? ""}|${action.configPath ?? ""}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      actions.push(action);
+    }
+  }
+
+  return actions;
+}
+
 function evaluateAgentStatus(
-  report: Omit<DoctorAgentReport, "status" | "reasons">,
+  report: Omit<DoctorAgentReport, "status" | "reasons" | "recommendedActions">,
   smokeEnabled: boolean
 ): Pick<DoctorAgentReport, "status" | "reasons"> {
   const reasons: string[] = [];
@@ -157,7 +362,8 @@ function buildSummary(reports: DoctorAgentReport[]): DoctorSummary {
     unhealthyAgents,
     availableAgents,
     unavailableAgents,
-    smokeFailures
+    smokeFailures,
+    recommendedActions: buildSummaryActions(reports)
   };
 }
 
@@ -188,7 +394,7 @@ export class Doctor {
             error: "Agent disabled in config."
           };
 
-      const reportBase: Omit<DoctorAgentReport, "status" | "reasons"> = {
+      const reportBase: Omit<DoctorAgentReport, "status" | "reasons" | "recommendedActions"> = {
         agentName,
         enabled: agentConfig.enabled,
         detection,
@@ -225,7 +431,8 @@ export class Doctor {
 
       reports.push({
         ...reportBase,
-        ...evaluateAgentStatus(reportBase, smokeEnabled)
+        ...evaluateAgentStatus(reportBase, smokeEnabled),
+        recommendedActions: buildAgentActions(reportBase, smokeEnabled)
       });
     }
 
