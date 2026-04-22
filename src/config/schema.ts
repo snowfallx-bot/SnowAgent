@@ -81,36 +81,104 @@ const DEFAULT_CAPABILITIES = {
   supportsNonInteractive: true
 } satisfies Record<keyof z.infer<typeof capabilitySchema>, boolean>;
 
-const DEFAULT_DETECT = {
-  versionArgs: [["--version"], ["version"]],
-  helpArgs: [["--help"], ["-h"]]
-};
-
-const DEFAULT_RUN = {
-  stdinArgs: [],
-  promptFileArgs: [],
-  promptArgArgs: [],
-  jsonModeArgs: [],
-  nonInteractiveArgs: [],
-  cwdArgs: []
-};
-
-function buildAgentDefaults(
-  commandCandidates: string[],
-  notes: string[]
-): AgentConfig {
+function buildCodexDefaults(): AgentConfig {
   return {
     enabled: true,
-    commandCandidates,
-    defaultArgs: [],
-    inputModePriority: ["stdin", "file", "args"] satisfies InputMode[],
+    commandCandidates: ["codex", "codex.exe", "codex.cmd"],
+    defaultArgs: ["exec"],
+    inputModePriority: ["stdin", "args"] satisfies InputMode[],
     timeoutMs: 120000,
     retries: 1,
     env: {},
-    detect: DEFAULT_DETECT,
-    run: DEFAULT_RUN,
-    capabilities: DEFAULT_CAPABILITIES,
-    notes
+    detect: {
+      versionArgs: [["--version"], ["version"]],
+      helpArgs: [["exec", "--help"], ["--help"], ["-h"]]
+    },
+    run: {
+      stdinArgs: ["-"],
+      promptFileArgs: [],
+      promptArgArgs: ["{prompt}"],
+      jsonModeArgs: ["--json"],
+      nonInteractiveArgs: ["--skip-git-repo-check", "--full-auto"],
+      cwdArgs: ["--cd", "{cwd}"]
+    },
+    capabilities: {
+      ...DEFAULT_CAPABILITIES,
+      supportsPromptFile: false
+    },
+    notes: [
+      "Defaults target `codex exec` because it is the documented non-interactive entrypoint on the local machine.",
+      "Prompt files are disabled by default because the local help text documents stdin and prompt args, not a prompt-file flag.",
+      "If your Codex setup needs different safety or sandbox flags, override run.nonInteractiveArgs."
+    ]
+  };
+}
+
+function buildCopilotDefaults(): AgentConfig {
+  return {
+    enabled: true,
+    commandCandidates: ["github-copilot", "copilot", "copilot.exe", "copilot.cmd"],
+    defaultArgs: [],
+    inputModePriority: ["args"] satisfies InputMode[],
+    timeoutMs: 120000,
+    retries: 1,
+    env: {},
+    detect: {
+      versionArgs: [["--version"]],
+      helpArgs: [["--help"], ["help"]]
+    },
+    run: {
+      stdinArgs: [],
+      promptFileArgs: [],
+      promptArgArgs: ["--prompt", "{prompt}"],
+      jsonModeArgs: ["--output-format", "json", "--silent"],
+      nonInteractiveArgs: ["--allow-all-tools", "--no-ask-user", "--stream", "off"],
+      cwdArgs: ["--add-dir", "{cwd}"]
+    },
+    capabilities: {
+      ...DEFAULT_CAPABILITIES,
+      supportsStdin: false,
+      supportsPromptFile: false
+    },
+    notes: [
+      "Defaults target `copilot --prompt` because the local help documents it as the non-interactive mode.",
+      "Copilot requires `--allow-all-tools` in non-interactive mode, so the default preset includes it.",
+      "If your environment prefers different permissions or stream settings, override run.nonInteractiveArgs and run.jsonModeArgs."
+    ]
+  };
+}
+
+function buildQwenDefaults(): AgentConfig {
+  return {
+    enabled: true,
+    commandCandidates: ["qwen", "qwen.exe", "qwen.cmd", "opencode", "opencode.exe", "opencode.cmd"],
+    defaultArgs: [],
+    inputModePriority: ["args"] satisfies InputMode[],
+    timeoutMs: 120000,
+    retries: 1,
+    env: {},
+    detect: {
+      versionArgs: [["--version"]],
+      helpArgs: [["--help"], ["-h"]]
+    },
+    run: {
+      stdinArgs: [],
+      promptFileArgs: [],
+      promptArgArgs: ["{prompt}"],
+      jsonModeArgs: ["--output-format", "json"],
+      nonInteractiveArgs: ["--approval-mode", "yolo"],
+      cwdArgs: ["--add-dir", "{cwd}"]
+    },
+    capabilities: {
+      ...DEFAULT_CAPABILITIES,
+      supportsStdin: false,
+      supportsPromptFile: false
+    },
+    notes: [
+      "Defaults target positional prompts because the local Qwen help documents them as the one-shot path.",
+      "The local Qwen CLI requires an auth type before non-interactive execution; configure auth in settings or env before relying on this preset.",
+      "If your Qwen/OpenCode variant supports a different non-interactive contract, override the run templates."
+    ]
   };
 }
 
@@ -138,26 +206,8 @@ export const DEFAULT_CONFIG: AppConfig = {
     }
   },
   agents: {
-    codex: buildAgentDefaults(
-      ["codex", "codex.exe", "codex.cmd"],
-      [
-        "Defaults only guess a Codex-style CLI entrypoint.",
-        "If your Codex CLI needs a subcommand or a prompt flag, configure defaultArgs and run templates explicitly."
-      ]
-    ),
-    copilot: buildAgentDefaults(
-      ["github-copilot", "copilot", "copilot.exe", "copilot.cmd"],
-      [
-        "Copilot CLI variants differ significantly.",
-        "Update commandCandidates, defaultArgs, and input templates to match your installed CLI."
-      ]
-    ),
-    qwen: buildAgentDefaults(
-      ["qwen", "qwen.exe", "qwen.cmd", "opencode", "opencode.exe", "opencode.cmd"],
-      [
-        "The third adapter targets Qwen/OpenCode-style CLIs by configuration rather than hard-coded arguments.",
-        "Override the command and run templates if your local tool uses different flags."
-      ]
-    )
+    codex: buildCodexDefaults(),
+    copilot: buildCopilotDefaults(),
+    qwen: buildQwenDefaults()
   }
 };

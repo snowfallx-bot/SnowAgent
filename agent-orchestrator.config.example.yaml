@@ -23,8 +23,8 @@ agents:
   codex:
     enabled: true
     commandCandidates: [codex, codex.exe, codex.cmd]
-    defaultArgs: []
-    inputModePriority: [stdin, file, args]
+    defaultArgs: [exec]
+    inputModePriority: [stdin, args]
     timeoutMs: 120000
     retries: 1
     env: {}
@@ -33,34 +33,39 @@ agents:
         - [--version]
         - [version]
       helpArgs:
+        - [exec, --help]
         - [--help]
         - [-h]
     run:
-      stdinArgs: []
-      promptFileArgs:
-        - --prompt-file
-        - "{promptFile}"
+      stdinArgs:
+        - "-"
+      promptFileArgs: []
       promptArgArgs:
-        - --prompt
         - "{prompt}"
-      jsonModeArgs: []
-      nonInteractiveArgs: []
-      cwdArgs: []
+      jsonModeArgs:
+        - --json
+      nonInteractiveArgs:
+        - --skip-git-repo-check
+        - --full-auto
+      cwdArgs:
+        - --cd
+        - "{cwd}"
     capabilities:
       supportsStdin: true
-      supportsPromptFile: true
+      supportsPromptFile: false
       supportsArgs: true
       supportsJsonMode: true
       supportsCwd: true
       supportsNonInteractive: true
     notes:
-      - Update run templates if your Codex CLI uses different prompt flags or subcommands.
+      - Defaults target `codex exec`, which is the documented non-interactive command on the local machine.
+      - If your Codex CLI needs different safety flags or a different entrypoint, override these fields.
 
   copilot:
     enabled: true
     commandCandidates: [github-copilot, copilot, copilot.exe, copilot.cmd]
     defaultArgs: []
-    inputModePriority: [stdin, file, args]
+    inputModePriority: [args]
     timeoutMs: 120000
     retries: 1
     env: {}
@@ -69,32 +74,41 @@ agents:
         - [--version]
       helpArgs:
         - [--help]
+        - [help]
     run:
       stdinArgs: []
-      promptFileArgs:
-        - --prompt-file
-        - "{promptFile}"
+      promptFileArgs: []
       promptArgArgs:
         - --prompt
         - "{prompt}"
-      jsonModeArgs: []
-      nonInteractiveArgs: []
-      cwdArgs: []
+      jsonModeArgs:
+        - --output-format
+        - json
+        - --silent
+      nonInteractiveArgs:
+        - --allow-all-tools
+        - --no-ask-user
+        - --stream
+        - off
+      cwdArgs:
+        - --add-dir
+        - "{cwd}"
     capabilities:
-      supportsStdin: true
-      supportsPromptFile: true
+      supportsStdin: false
+      supportsPromptFile: false
       supportsArgs: true
       supportsJsonMode: true
       supportsCwd: true
       supportsNonInteractive: true
     notes:
-      - Copilot CLI variants differ; customize commandCandidates and defaultArgs as needed.
+      - Defaults target `copilot --prompt`, which the local help documents as the non-interactive mode.
+      - `--allow-all-tools` is included because Copilot requires it for non-interactive execution.
 
   qwen:
     enabled: true
     commandCandidates: [qwen, qwen.exe, qwen.cmd, opencode, opencode.exe, opencode.cmd]
     defaultArgs: []
-    inputModePriority: [stdin, file, args]
+    inputModePriority: [args]
     timeoutMs: 120000
     retries: 1
     env: {}
@@ -105,22 +119,25 @@ agents:
         - [--help]
     run:
       stdinArgs: []
-      promptFileArgs:
-        - --prompt-file
-        - "{promptFile}"
+      promptFileArgs: []
       promptArgArgs:
-        - --prompt
         - "{prompt}"
-      jsonModeArgs: []
-      nonInteractiveArgs: []
-      cwdArgs: []
+      jsonModeArgs:
+        - --output-format
+        - json
+      nonInteractiveArgs:
+        - --approval-mode
+        - yolo
+      cwdArgs:
+        - --add-dir
+        - "{cwd}"
     capabilities:
-      supportsStdin: true
-      supportsPromptFile: true
+      supportsStdin: false
+      supportsPromptFile: false
       supportsArgs: true
       supportsJsonMode: true
       supportsCwd: true
       supportsNonInteractive: true
     notes:
-      - This adapter can target Qwen or OpenCode style CLIs via configuration only.
-
+      - Defaults target positional prompts because the local Qwen help documents them as the one-shot path.
+      - Configure Qwen auth before using non-interactive mode.

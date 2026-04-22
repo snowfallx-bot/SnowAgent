@@ -10,6 +10,14 @@
 
 项目重点不是“假装知道每个 CLI 的准确参数”，而是把这些不确定性做成可探测、可配置、可降级的系统。
 
+当前仓库还带了一组“本机帮助文本校准过的保守默认值”：
+
+- `codex` 默认走 `codex exec`
+- `copilot` 默认走 `copilot --prompt`
+- `qwen` 默认走位置参数 one-shot 模式
+
+这些默认值是为了让项目在这台机器上更接近“开箱可跑”，不是为了宣称所有用户机器都一样，所以配置覆盖依然是第一优先级。
+
 ## 功能概览
 
 - 统一的 `AgentAdapter` 接口：`detect()` / `buildCommand()` / `parseOutput()` / `run()`
@@ -118,6 +126,12 @@ node .\dist\cli\index.js run --task review --input-file .\demo\review.diff.txt -
 node .\dist\cli\index.js run --task fix --input-file .\demo\bug.txt --cwd . --agent auto
 ```
 
+如果你只想验证路由和命令构建，而不真的启动 agent，可以先用：
+
+```powershell
+node .\dist\cli\index.js run --task summarize --input-file .\demo\issue.txt --cwd . --dry-run --json
+```
+
 ## 配置说明
 
 配置支持 JSON 和 YAML。默认会在当前目录查找：
@@ -140,23 +154,29 @@ agents:
     enabled: true
     commandCandidates: [codex, codex.exe, codex.cmd]
     executablePath:
-    defaultArgs: []
-    inputModePriority: [stdin, file, args]
+    defaultArgs: [exec]
+    inputModePriority: [stdin, args]
     timeoutMs: 120000
     retries: 1
     detect:
       versionArgs:
         - [--version]
       helpArgs:
-        - [--help]
+        - [exec, --help]
     run:
-      stdinArgs: []
-      promptFileArgs:
-        - --prompt-file
-        - "{promptFile}"
+      stdinArgs:
+        - "-"
+      promptFileArgs: []
       promptArgArgs:
-        - --prompt
         - "{prompt}"
+      jsonModeArgs:
+        - --json
+      nonInteractiveArgs:
+        - --skip-git-repo-check
+        - --full-auto
+      cwdArgs:
+        - --cd
+        - "{cwd}"
 ```
 
 ### 为什么不能硬编码 CLI 参数
@@ -167,6 +187,7 @@ agents:
 - 入口是 `.exe`、`.cmd`、`.bat` 或 `.ps1`
 - 有的需要子命令，如 `chat` / `ask` / `run`
 - 有的支持 `stdin`，有的只支持 `--prompt-file`
+- 有的支持结构化输出，但输出的是 JSONL 事件流而不是单个 JSON 对象
 - `--version`、`version`、`-h`、`--help` 的行为不一致
 - 有的 CLI 输出 JSON，有的只输出普通文本
 
@@ -215,6 +236,15 @@ qwen -h
 
 然后把能工作的命令形态回填到配置里。
 
+在这台机器上，已经确认这些入口可探测：
+
+- `codex --version`
+- `codex exec --help`
+- `copilot --help`
+- `qwen --help`
+
+因此示例配置默认优先使用这些已经验证存在的非交互入口。
+
 ### `run`
 
 执行标准任务。
@@ -262,10 +292,12 @@ PromptBuilder 会要求 agent 输出：
 
 解析优先级：
 
-1. `===RESULT_JSON===` 块
-2. ```json code block
-3. 启发式字段提取，如 `summary: ...`
-4. 保留 raw text
+1. 原始 JSON 对象或 JSON 数组
+2. JSONL 事件流
+3. `===RESULT_JSON===` 块
+4. ```json code block
+5. 启发式字段提取，如 `summary: ...`
+6. 保留 raw text
 
 这样即使外部 CLI 没能严格输出 JSON，系统也不会直接报废。
 
@@ -335,15 +367,17 @@ npm test
 ## 当前限制
 
 - 还不能自动推断每个第三方 CLI 的真实 prompt 参数，只能探测 executable 和帮助信息
+- 这版虽然对本机 `codex/copilot/qwen` 做了帮助文本校准，但仍不保证你的其他机器使用完全相同的参数组合
 - 某些 CLI 若只能通过 shell alias 调用，而不是实际 `.exe/.cmd` 文件，当前 PATH 探测可能识别不到
 - 对 `.cmd/.bat` 做了包装，但复杂 quoting 仍建议优先走 `stdin` 或 prompt file
 - 结构化输出解析是 robust-first，不是 strict schema enforcement
 - 当前 `qwen` adapter 采用“Qwen/OpenCode 风格”配置骨架，而不是某个特定发行版的硬编码实现
+- 本机 `qwen` 已探测到 CLI，但实际 non-interactive 运行仍依赖你先完成 auth type 配置
 
 ## 开发建议
 
 - 真正接机前，先执行 `detect`
-- 若运行失败，优先把 prompt 输入方式改成 `stdin` 或 `promptFileArgs`
+- 若运行失败，先看本机 help 是否和示例配置一致，再决定是改 `defaultArgs` 还是改输入方式
 - 尽量避免把超长 prompt 直接塞进命令行参数
 - 如果某个 CLI 必须带子命令，放进 `defaultArgs`
 
