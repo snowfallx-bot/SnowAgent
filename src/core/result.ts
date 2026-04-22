@@ -1,4 +1,6 @@
 export type StructuredOutputFormat =
+  | "json"
+  | "jsonl"
   | "result_json"
   | "markdown_json"
   | "heuristic"
@@ -6,8 +8,7 @@ export type StructuredOutputFormat =
 
 export interface StructuredParseResult {
   format: StructuredOutputFormat;
-  data?: Record<string, unknown>;
+  data?: unknown;
   rawText: string;
   extractionNotes: string[];
 }
-

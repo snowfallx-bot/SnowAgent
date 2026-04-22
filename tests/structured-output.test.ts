@@ -33,6 +33,36 @@ after
     });
   });
 
+  it("parses raw JSON objects and arrays", () => {
+    const objectResult = parseStructuredOutput(`{"summary":"direct"}`);
+    const arrayResult = parseStructuredOutput(`[{"type":"result","ok":true}]`);
+
+    expect(objectResult.format).toBe("json");
+    expect(objectResult.data).toEqual({ summary: "direct" });
+    expect(arrayResult.format).toBe("json");
+    expect(arrayResult.data).toEqual([{ type: "result", ok: true }]);
+  });
+
+  it("summarizes JSONL event streams", () => {
+    const result = parseStructuredOutput(`
+{"type":"assistant.message_delta","data":{"content":"{\""}}
+{"type":"assistant.message","data":{"content":"{\\"ok\\":true}"}}
+{"type":"result","exitCode":0}
+`);
+
+    expect(result.format).toBe("jsonl");
+    expect(result.data).toEqual({
+      eventCount: 2,
+      eventTypes: ["assistant.message", "result"],
+      messages: ['{"ok":true}'],
+      finalMessage: '{"ok":true}',
+      result: {
+        type: "result",
+        exitCode: 0
+      }
+    });
+  });
+
   it("extracts heuristic fields and patches when JSON is unavailable", () => {
     const result = parseStructuredOutput(`
 summary: Cache invalidation bug
@@ -53,4 +83,3 @@ confidence: 0.55
     });
   });
 });
-

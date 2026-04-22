@@ -240,12 +240,28 @@ export abstract class ConfigurableCliAgentAdapter implements AgentAdapter {
   }
 
   public parseOutput(stdout: string, stderr: string): StructuredParseResult | undefined {
-    const combined = [stdout, stderr].filter(Boolean).join("\n").trim();
-    if (!combined) {
+    const candidates = [
+      stdout.trim(),
+      stderr.trim(),
+      [stdout, stderr].filter(Boolean).join("\n").trim()
+    ].filter(Boolean);
+
+    if (candidates.length === 0) {
       return undefined;
     }
 
-    return parseStructuredOutput(combined);
+    let fallback: StructuredParseResult | undefined;
+
+    for (const candidate of candidates) {
+      const parsed = parseStructuredOutput(candidate);
+      if (parsed.format !== "raw") {
+        return parsed;
+      }
+
+      fallback ??= parsed;
+    }
+
+    return fallback;
   }
 
   public async run(input: AgentRunInput): Promise<AgentRunResult> {
@@ -459,4 +475,3 @@ export abstract class ConfigurableCliAgentAdapter implements AgentAdapter {
     return undefined;
   }
 }
-
