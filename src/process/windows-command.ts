@@ -5,6 +5,12 @@ export interface PreparedCommand {
   args: string[];
 }
 
+export interface DisplayRedactionOptions {
+  maxArgLength?: number;
+  redactValues?: string[];
+  sensitiveFlags?: string[];
+}
+
 function quoteForDisplay(value: string): string {
   if (value.length === 0) {
     return '""';
@@ -27,6 +33,36 @@ function quoteForCmd(value: string): string {
   }
 
   return value;
+}
+
+export function redactArgsForDisplay(
+  args: string[],
+  options: DisplayRedactionOptions = {}
+): string[] {
+  const maxArgLength = options.maxArgLength ?? 160;
+  const redactValues = new Set(options.redactValues ?? []);
+  const sensitiveFlags = new Set(
+    (options.sensitiveFlags ?? ["--prompt", "-p", "--system-prompt", "--append-system-prompt"])
+      .map((flag) => flag.toLowerCase())
+  );
+
+  return args.map((arg, index) => {
+    const previous = index > 0 ? args[index - 1]?.toLowerCase() : undefined;
+
+    if (redactValues.has(arg)) {
+      return `<redacted:${arg.length} chars>`;
+    }
+
+    if (previous && sensitiveFlags.has(previous)) {
+      return `<redacted:${arg.length} chars>`;
+    }
+
+    if (arg.length > maxArgLength || /[\r\n]/u.test(arg)) {
+      return `<redacted:${arg.length} chars>`;
+    }
+
+    return arg;
+  });
 }
 
 export function formatCommandForDisplay(command: string, args: string[]): string {

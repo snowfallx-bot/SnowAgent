@@ -5,6 +5,7 @@ import { AgentName, Task } from "../core/task";
 import { parseStructuredOutput } from "../parsers/structured-output";
 import {
   PreparedCommand,
+  redactArgsForDisplay,
   formatCommandForDisplay,
   prepareWindowsCommand
 } from "../process/windows-command";
@@ -228,6 +229,10 @@ export abstract class ConfigurableCliAgentAdapter implements AgentAdapter {
     }
 
     const preparedCommand = prepareWindowsCommand(detection.executable, args);
+    const displayArgs = redactArgsForDisplay(args, {
+      redactValues: [input.prompt].filter(Boolean),
+      maxArgLength: 160
+    });
     return {
       executable: detection.executable,
       args,
@@ -235,7 +240,7 @@ export abstract class ConfigurableCliAgentAdapter implements AgentAdapter {
       stdinData,
       promptFilePath,
       preparedCommand,
-      commandLine: formatCommandForDisplay(detection.executable, args)
+      commandLine: formatCommandForDisplay(detection.executable, displayArgs)
     };
   }
 
