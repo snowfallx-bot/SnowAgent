@@ -10,6 +10,7 @@ import { AgentRegistry } from "../agents/registry";
 import { loadConfig } from "../config/load-config";
 import { AppConfig } from "../config/schema";
 import { Orchestrator } from "../core/orchestrator";
+import { ConfigReportService } from "../core/config-report";
 import { Doctor } from "../core/doctor";
 import { ArtifactHistoryService, HISTORY_KINDS } from "../core/history";
 import { PreviewService } from "../core/preview";
@@ -23,11 +24,13 @@ import { Logger } from "../utils/logger";
 
 interface Context {
   config: AppConfig;
+  configPath?: string;
   registry: AgentRegistry;
   orchestrator: Orchestrator;
   doctor: Doctor;
   preview: PreviewService;
   history: ArtifactHistoryService;
+  configReport: ConfigReportService;
   logger: Logger;
 }
 
@@ -83,7 +86,7 @@ function createContext(
   cwd: string,
   jsonOutput = false
 ): Context {
-  const { config } = loadConfig(configPath, cwd);
+  const { config, configPath: resolvedConfigPath } = loadConfig(configPath, cwd);
   const logger = new Logger({
     level: config.logging.level,
     filePath: resolveLogPath(config, cwd),
@@ -107,15 +110,18 @@ function createContext(
     new PromptBuilder()
   );
   const history = new ArtifactHistoryService(config);
+  const configReport = new ConfigReportService(config, resolvedConfigPath);
   const doctor = new Doctor(config, registry);
 
   return {
     config,
+    configPath: resolvedConfigPath,
     registry,
     orchestrator,
     doctor,
     preview,
     history,
+    configReport,
     logger
   };
 }
@@ -223,6 +229,68 @@ program
     for (const agent of result) {
       console.log(`${agent.name} (${agent.enabled ? "enabled" : "disabled"})`);
       console.log(`  candidates: ${agent.commandCandidates.join(", ")}`);
+      for (const note of agent.notes) {
+        console.log(`  note: ${note}`);
+      }
+    }
+  });
+
+program
+  .command("config")
+  .description("Show the effective merged config and which config file was loaded.")
+  .option("-c, --config <path>", "Path to a JSON/YAML config file.")
+  .option("--cwd <path>", "Base working directory.", process.cwd())
+  .option("--agent <name>", `Limit output to one agent: ${AGENT_NAMES.join(", ")}`)
+  .option("--json", "Print JSON output.")
+  .action((options: {
+    config?: string;
+    cwd: string;
+    agent?: string;
+    json?: boolean;
+  }) => {
+    const context = createContext(
+      options.config,
+      path.resolve(options.cwd),
+      Boolean(options.json)
+    );
+    const agentNames = options.agent ? [parseAgentName(options.agent)] : undefined;
+    const report = context.configReport.inspect({ agentNames });
+
+    if (options.json) {
+      printJson(report);
+      return;
+    }
+
+    console.log(`configPath: ${report.configPath ?? "(using built-in defaults)"}`);
+    console.log(`usingDefaultConfig: ${report.usingDefaultConfig}`);
+    console.log(
+      `logging: level=${report.logging.level} saveLogsToFile=${report.logging.saveLogsToFile}`
+    );
+    console.log(
+      `runtime: detectTimeoutMs=${report.runtime.detectTimeoutMs} maxPromptArgLength=${report.runtime.maxPromptArgLength}`
+    );
+    console.log(
+      `artifacts: rootDir=${report.artifacts.rootDir} saveOutputs=${report.artifacts.saveOutputs} savePromptFiles=${report.artifacts.savePromptFiles} saveLogs=${report.artifacts.saveLogs}`
+    );
+    for (const taskType of TASK_TYPES) {
+      console.log(`route.${taskType}: ${report.routing[taskType].join(" -> ")}`);
+    }
+    for (const agent of report.agents) {
+      console.log(`${agent.name}: ${agent.enabled ? "enabled" : "disabled"}`);
+      console.log(`  commandCandidates: ${agent.commandCandidates.join(", ")}`);
+      if (agent.executablePath) {
+        console.log(`  executablePath: ${agent.executablePath}`);
+      }
+      console.log(`  defaultArgs: ${agent.defaultArgs.join(" ") || "(none)"}`);
+      console.log(`  inputModes: ${agent.inputModePriority.join(", ")}`);
+      console.log(`  timeoutMs: ${agent.timeoutMs}`);
+      console.log(`  retries: ${agent.retries}`);
+      console.log(
+        `  jsonModeArgs: ${agent.run.jsonModeArgs.join(" ") || "(none)"}`
+      );
+      console.log(
+        `  nonInteractiveArgs: ${agent.run.nonInteractiveArgs.join(" ") || "(none)"}`
+      );
       for (const note of agent.notes) {
         console.log(`  note: ${note}`);
       }

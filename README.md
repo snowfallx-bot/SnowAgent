@@ -28,7 +28,7 @@
 - 规则路由与 fallback
 - 结构化输出解析：支持 JSON / JSON 数组 / JSONL / `===RESULT_JSON===` / Markdown JSON code block，并会继续尝试从事件 envelope 中提取最终结构化内容
 - YAML / JSON 配置与 `zod` 校验
-- 本地 CLI 入口：`list` / `detect` / `doctor` / `route` / `prompt` / `history` / `run`
+- 本地 CLI 入口：`list` / `config` / `detect` / `doctor` / `route` / `prompt` / `history` / `run`
 - 基础单元测试，包含 `child_process.spawn` mock
 
 ## 目录结构
@@ -77,6 +77,7 @@ PowerShell 5.x：
 
 ```powershell
 node .\dist\cli\index.js list
+node .\dist\cli\index.js config --agent codex
 node .\dist\cli\index.js detect
 node .\dist\cli\index.js doctor
 node .\dist\cli\index.js route --task fix --cwd . --detect
@@ -89,6 +90,7 @@ PowerShell 7.x：
 
 ```powershell
 node ./dist/cli/index.js list
+node ./dist/cli/index.js config --json
 node ./dist/cli/index.js detect
 node ./dist/cli/index.js doctor --json
 node ./dist/cli/index.js route --task review --cwd . --json
@@ -132,6 +134,7 @@ node .\dist\cli\index.js detect --json
 node .\dist\cli\index.js doctor --json
 node .\dist\cli\index.js doctor --agent copilot --smoke --json
 node .\dist\cli\index.js doctor --agent qwen --smoke --fail-on-unhealthy
+node .\dist\cli\index.js config --agent copilot --json
 node .\dist\cli\index.js route --task review --agent codex --cwd . --detect --json
 node .\dist\cli\index.js prompt --task summarize --input-file .\demo\issue.txt --cwd . --json
 node .\dist\cli\index.js history --kind preview --limit 5 --json
@@ -292,6 +295,22 @@ qwen -h
 - `qwen --help`
 
 因此示例配置默认优先使用这些已经验证存在的非交互入口。
+
+### `config`
+
+查看当前生效的合并后配置，以及到底加载到了哪份配置文件。
+
+```powershell
+node .\dist\cli\index.js config
+node .\dist\cli\index.js config --agent codex --json
+node .\dist\cli\index.js config --config .\my-config.yaml
+```
+
+这个命令适合：
+
+- 确认当前到底有没有读到本地配置文件
+- 查看每个 agent 的有效默认参数、输入模式和超时配置
+- 在修改 YAML/JSON 后快速核对 merge 结果
 
 ### `doctor`
 
