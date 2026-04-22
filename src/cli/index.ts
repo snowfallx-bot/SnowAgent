@@ -217,6 +217,15 @@ program
     if (report.artifactPath) {
       console.log(`artifactPath: ${report.artifactPath}`);
     }
+    for (const action of report.summary.recommendedActions) {
+      console.log(`nextAction: [${action.category}] ${action.message}`);
+      if (action.command) {
+        console.log(`  command: ${action.command}`);
+      }
+      if (action.configPath) {
+        console.log(`  configPath: ${action.configPath}`);
+      }
+    }
 
     for (const agent of report.agents) {
       console.log(
@@ -236,6 +245,15 @@ program
       }
       for (const reason of agent.reasons) {
         console.log(`  reason: ${reason}`);
+      }
+      for (const action of agent.recommendedActions) {
+        console.log(`  nextAction: [${action.category}] ${action.message}`);
+        if (action.command) {
+          console.log(`    command: ${action.command}`);
+        }
+        if (action.configPath) {
+          console.log(`    configPath: ${action.configPath}`);
+        }
       }
       if (agent.smoke) {
         console.log(

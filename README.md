@@ -264,6 +264,7 @@ qwen -h
 - 可选 smoke-run 结果
 - 总体健康状态与汇总计数
 - 自动落盘的 doctor 报告路径
+- 面向修复的建议动作，例如 auth / config / timeout / smoke
 
 ```powershell
 node .\dist\cli\index.js doctor
@@ -278,6 +279,7 @@ node .\dist\cli\index.js doctor --agent qwen --smoke --fail-on-unhealthy
 - `doctor` 会进一步告诉你“当前配置准备怎么调用它”
 - 加 `--smoke` 后，还能直接验证 non-interactive 组合是不是当前机器真能跑
 - 加 `--fail-on-unhealthy` 后，可以直接把 `doctor` 当成 CI / 脚本的健康检查入口
+- 当 `doctor` 发现问题时，会在终端、JSON 和 `artifacts/doctor/*.json` 里同时给出下一步修复建议
 
 ### `run`
 
