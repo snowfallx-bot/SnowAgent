@@ -1,3 +1,7 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -54,6 +58,7 @@ class FakeAdapter implements AgentAdapter {
 describe("Doctor", () => {
   it("reports detection and run presets without smoke", async () => {
     const config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+    config.artifacts.saveOutputs = false;
     const registry = {
       get(name: AgentName): AgentAdapter | undefined {
         if (name === "copilot") {
@@ -76,13 +81,17 @@ describe("Doctor", () => {
 
     expect(report.agents).toHaveLength(1);
     expect(report.agents[0]?.agentName).toBe("copilot");
+    expect(report.agents[0]?.status).toBe("healthy");
+    expect(report.summary.status).toBe("healthy");
     expect(report.agents[0]?.detection.executable).toBe("copilot.exe");
     expect(report.agents[0]?.runPreset.inputModePriority).toEqual(["args"]);
     expect(report.agents[0]?.smoke).toBeUndefined();
+    expect(report.artifactPath).toBeUndefined();
   });
 
   it("runs smoke tests for available adapters when requested", async () => {
     const config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+    config.artifacts.saveOutputs = false;
     const registry = {
       get(name: AgentName): AgentAdapter | undefined {
         if (name === "codex") {
@@ -139,5 +148,65 @@ describe("Doctor", () => {
       parsedData: { ok: true, agent: "codex" },
       stderr: undefined
     });
+    expect(report.agents[0]?.status).toBe("healthy");
+    expect(report.summary.smokeFailures).toBe(0);
+  });
+
+  it("writes doctor artifacts and marks failed smoke runs unhealthy", async () => {
+    const config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "snowagent-doctor-"));
+    const registry = {
+      get(name: AgentName): AgentAdapter | undefined {
+        if (name === "qwen") {
+          return new FakeAdapter(
+            "qwen",
+            {
+              available: true,
+              executable: "qwen.cmd",
+              detectedInputModes: ["args"],
+              notes: []
+            },
+            {
+              agentName: "qwen",
+              success: false,
+              exitCode: 1,
+              stdout: "",
+              stderr: "missing auth",
+              durationMs: 321,
+              timedOut: false,
+              rawOutput: "",
+              logs: [],
+              attemptCount: 2,
+              commandLine: "qwen.cmd prompt",
+              inputMode: "args"
+            }
+          );
+        }
+        return undefined;
+      }
+    } as AgentRegistry;
+
+    const doctor = new Doctor(config, registry);
+    const report = await doctor.inspect({
+      cwd: tempDir,
+      smoke: true,
+      agentNames: ["qwen"],
+      timeoutMs: 5000
+    });
+
+    expect(report.summary.status).toBe("unhealthy");
+    expect(report.summary.smokeFailures).toBe(1);
+    expect(report.agents[0]?.status).toBe("unhealthy");
+    expect(report.agents[0]?.reasons).toContain(
+      "Smoke test failed with exitCode=1 timedOut=false."
+    );
+    expect(report.artifactPath).toBeDefined();
+    expect(report.artifactPath && fs.existsSync(report.artifactPath)).toBe(true);
+
+    const savedReport = JSON.parse(
+      fs.readFileSync(report.artifactPath as string, "utf8")
+    ) as { summary: { status: string } };
+
+    expect(savedReport.summary.status).toBe("unhealthy");
   });
 });
