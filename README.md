@@ -26,9 +26,9 @@
 - 输入模式优先级：`stdin` -> `file` -> `args`
 - 统一结果模型：`stdout` / `stderr` / `exitCode` / `durationMs` / `timedOut` / `parsed`
 - 规则路由与 fallback
-- 结构化输出解析：优先 `===RESULT_JSON===`，其次 Markdown JSON code block
+- 结构化输出解析：支持 JSON / JSON 数组 / JSONL / `===RESULT_JSON===` / Markdown JSON code block，并会继续尝试从事件 envelope 中提取最终结构化内容
 - YAML / JSON 配置与 `zod` 校验
-- 本地 CLI 入口：`list` / `detect` / `run`
+- 本地 CLI 入口：`list` / `detect` / `doctor` / `run`
 - 基础单元测试，包含 `child_process.spawn` mock
 
 ## 目录结构
@@ -78,6 +78,7 @@ PowerShell 5.x：
 ```powershell
 node .\dist\cli\index.js list
 node .\dist\cli\index.js detect
+node .\dist\cli\index.js doctor
 node .\dist\cli\index.js run --task summarize --input-file .\demo\issue.txt --cwd .
 ```
 
@@ -86,6 +87,7 @@ PowerShell 7.x：
 ```powershell
 node ./dist/cli/index.js list
 node ./dist/cli/index.js detect
+node ./dist/cli/index.js doctor --json
 node ./dist/cli/index.js run --task review --input-file ./demo/review.diff.txt --cwd .
 ```
 
@@ -118,7 +120,14 @@ Copy-Item .\agent-orchestrator.config.example.yaml .\agent-orchestrator.config.y
 node .\dist\cli\index.js detect --json
 ```
 
-4. 再跑 demo：
+4. 先用 doctor 看最终执行预设，必要时顺手做 smoke：
+
+```powershell
+node .\dist\cli\index.js doctor --json
+node .\dist\cli\index.js doctor --agent copilot --smoke --json
+```
+
+5. 再跑 demo：
 
 ```powershell
 node .\dist\cli\index.js run --task summarize --input-file .\demo\issue.txt --cwd . --agent auto
@@ -245,6 +254,26 @@ qwen -h
 
 因此示例配置默认优先使用这些已经验证存在的非交互入口。
 
+### `doctor`
+
+输出每个 agent 的：
+
+- 探测结果
+- 当前 run 预设
+- 可选 smoke-run 结果
+
+```powershell
+node .\dist\cli\index.js doctor
+node .\dist\cli\index.js doctor --json
+node .\dist\cli\index.js doctor --agent copilot --smoke --json
+```
+
+这个命令适合在真正跑任务前做一次“体检”：
+
+- `detect` 只回答“命令在不在”
+- `doctor` 会进一步告诉你“当前配置准备怎么调用它”
+- 加 `--smoke` 后，还能直接验证 non-interactive 组合是不是当前机器真能跑
+
 ### `run`
 
 执行标准任务。
@@ -266,6 +295,8 @@ node .\dist\cli\index.js run --task fix --input-file .\demo\bug.txt --agent auto
 - `--timeout-ms <ms>`
 - `--json`
 - `--dry-run`
+
+带 `--json` 时，CLI 会抑制运行日志的标准输出污染，只保留最终 JSON 结果，方便后续脚本或 webhook 消费。
 
 ## 路由与 fallback
 

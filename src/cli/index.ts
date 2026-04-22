@@ -10,6 +10,7 @@ import { AgentRegistry } from "../agents/registry";
 import { loadConfig } from "../config/load-config";
 import { AppConfig } from "../config/schema";
 import { Orchestrator } from "../core/orchestrator";
+import { Doctor } from "../core/doctor";
 import { PromptBuilder } from "../core/prompt-builder";
 import { Router } from "../core/router";
 import { AGENT_NAMES, AgentName, TASK_TYPES, Task } from "../core/task";
@@ -21,6 +22,7 @@ interface Context {
   config: AppConfig;
   registry: AgentRegistry;
   orchestrator: Orchestrator;
+  doctor: Doctor;
   logger: Logger;
 }
 
@@ -56,11 +58,16 @@ function resolveLogPath(config: AppConfig, cwd: string): string | undefined {
   );
 }
 
-function createContext(configPath: string | undefined, cwd: string): Context {
+function createContext(
+  configPath: string | undefined,
+  cwd: string,
+  jsonOutput = false
+): Context {
   const { config } = loadConfig(configPath, cwd);
   const logger = new Logger({
     level: config.logging.level,
-    filePath: resolveLogPath(config, cwd)
+    filePath: resolveLogPath(config, cwd),
+    consoleEnabled: !jsonOutput
   });
   const registry = new AgentRegistry(config, {
     processRunner: new ProcessRunner(),
@@ -73,11 +80,13 @@ function createContext(configPath: string | undefined, cwd: string): Context {
     new PromptBuilder(),
     logger
   );
+  const doctor = new Doctor(config, registry);
 
   return {
     config,
     registry,
     orchestrator,
+    doctor,
     logger
   };
 }
@@ -107,7 +116,11 @@ program
   .option("--cwd <path>", "Base working directory.", process.cwd())
   .option("--json", "Print JSON output.")
   .action((options: { config?: string; cwd: string; json?: boolean }) => {
-    const context = createContext(options.config, path.resolve(options.cwd));
+    const context = createContext(
+      options.config,
+      path.resolve(options.cwd),
+      Boolean(options.json)
+    );
     const result = context.registry.list();
     if (options.json) {
       printJson(result);
@@ -130,7 +143,11 @@ program
   .option("--cwd <path>", "Base working directory.", process.cwd())
   .option("--json", "Print JSON output.")
   .action(async (options: { config?: string; cwd: string; json?: boolean }) => {
-    const context = createContext(options.config, path.resolve(options.cwd));
+    const context = createContext(
+      options.config,
+      path.resolve(options.cwd),
+      Boolean(options.json)
+    );
     const result = await context.registry.detectAll();
     if (options.json) {
       printJson(result);
@@ -147,6 +164,67 @@ program
         console.log(`  error: ${detection.error}`);
       }
       for (const note of detection.notes) {
+        console.log(`  note: ${note}`);
+      }
+    }
+  });
+
+program
+  .command("doctor")
+  .description("Show agent detection, configured run presets, and optional smoke-run results.")
+  .option("-c, --config <path>", "Path to a JSON/YAML config file.")
+  .option("--cwd <path>", "Base working directory.", process.cwd())
+  .option("--agent <name>", `Limit to one agent: ${AGENT_NAMES.join(", ")}`)
+  .option("--smoke", "Run a real non-interactive smoke prompt for each selected agent.")
+  .option("--timeout-ms <ms>", "Smoke test timeout override.")
+  .option("--json", "Print JSON output.")
+  .action(async (options: {
+    config?: string;
+    cwd: string;
+    agent?: string;
+    smoke?: boolean;
+    timeoutMs?: string;
+    json?: boolean;
+  }) => {
+    const cwd = path.resolve(options.cwd);
+    const context = createContext(options.config, cwd, Boolean(options.json));
+    const agentNames = options.agent ? [parseAgentName(options.agent)] : undefined;
+
+    const report = await context.doctor.inspect({
+      cwd,
+      smoke: Boolean(options.smoke),
+      agentNames,
+      timeoutMs: options.timeoutMs ? Number(options.timeoutMs) : undefined
+    });
+
+    if (options.json) {
+      printJson(report);
+      return;
+    }
+
+    for (const agent of report.agents) {
+      console.log(`${agent.agentName}: ${agent.detection.available ? "available" : "unavailable"}`);
+      console.log(`  enabled: ${agent.enabled}`);
+      console.log(`  defaultArgs: ${agent.runPreset.defaultArgs.join(" ") || "(none)"}`);
+      console.log(`  inputModes: ${agent.runPreset.inputModePriority.join(", ")}`);
+      if (agent.detection.executable) {
+        console.log(`  executable: ${agent.detection.executable}`);
+      }
+      if (agent.detection.error) {
+        console.log(`  error: ${agent.detection.error}`);
+      }
+      for (const note of agent.detection.notes) {
+        console.log(`  detectNote: ${note}`);
+      }
+      if (agent.smoke) {
+        console.log(
+          `  smoke: ${agent.smoke.success ? "success" : "failed"} exitCode=${agent.smoke.exitCode} timedOut=${agent.smoke.timedOut} durationMs=${agent.smoke.durationMs}`
+        );
+        if (agent.smoke.parsedFormat) {
+          console.log(`  smokeParsed: ${agent.smoke.parsedFormat}`);
+        }
+      }
+      for (const note of agent.runPreset.notes) {
         console.log(`  note: ${note}`);
       }
     }
@@ -182,7 +260,7 @@ program
     }) => {
       const cwd = path.resolve(options.cwd);
       const prompt = await readPrompt(options.prompt, options.inputFile);
-      const context = createContext(options.config, cwd);
+      const context = createContext(options.config, cwd, Boolean(options.json));
 
       if (!(TASK_TYPES as readonly string[]).includes(options.task)) {
         throw new Error(`Unsupported task type "${options.task}".`);
@@ -234,4 +312,3 @@ program.parseAsync(process.argv).catch((error: unknown) => {
   console.error(message);
   process.exitCode = 1;
 });
-

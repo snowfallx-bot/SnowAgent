@@ -16,6 +16,7 @@ export interface LoggerOptions {
   filePath?: string;
   bindings?: Record<string, unknown>;
   initializeFile?: boolean;
+  consoleEnabled?: boolean;
 }
 
 const LEVEL_ORDER: Record<LogLevel, number> = {
@@ -29,11 +30,13 @@ export class Logger {
   private readonly level: LogLevel;
   private readonly filePath?: string;
   private readonly bindings: Record<string, unknown>;
+  private readonly consoleEnabled: boolean;
 
   public constructor(options: LoggerOptions) {
     this.level = options.level;
     this.filePath = options.filePath;
     this.bindings = options.bindings ?? {};
+    this.consoleEnabled = options.consoleEnabled !== false;
 
     if (this.filePath && options.initializeFile !== false) {
       ensureDir(path.dirname(this.filePath));
@@ -46,7 +49,8 @@ export class Logger {
       level: this.level,
       filePath: this.filePath,
       bindings: { ...this.bindings, ...bindings },
-      initializeFile: false
+      initializeFile: false,
+      consoleEnabled: this.consoleEnabled
     });
   }
 
@@ -84,12 +88,14 @@ export class Logger {
         : ""
     }`;
 
-    if (level === "error") {
-      console.error(line);
-    } else if (level === "warn") {
-      console.warn(line);
-    } else {
-      console.log(line);
+    if (this.consoleEnabled) {
+      if (level === "error") {
+        console.error(line);
+      } else if (level === "warn") {
+        console.warn(line);
+      } else {
+        console.log(line);
+      }
     }
 
     if (this.filePath) {
@@ -98,4 +104,3 @@ export class Logger {
     }
   }
 }
-
