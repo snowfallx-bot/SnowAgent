@@ -11,6 +11,7 @@ import { loadConfig } from "../config/load-config";
 import { AppConfig } from "../config/schema";
 import { Orchestrator } from "../core/orchestrator";
 import { Doctor } from "../core/doctor";
+import { ArtifactHistoryService, HISTORY_KINDS } from "../core/history";
 import { PreviewService } from "../core/preview";
 import { PromptBuilder } from "../core/prompt-builder";
 import { Router } from "../core/router";
@@ -25,6 +26,7 @@ interface Context {
   orchestrator: Orchestrator;
   doctor: Doctor;
   preview: PreviewService;
+  history: ArtifactHistoryService;
   logger: Logger;
 }
 
@@ -88,6 +90,7 @@ function createContext(
     new Router(config),
     new PromptBuilder()
   );
+  const history = new ArtifactHistoryService(config);
   const doctor = new Doctor(config, registry);
 
   return {
@@ -96,6 +99,7 @@ function createContext(
     orchestrator,
     doctor,
     preview,
+    history,
     logger
   };
 }
@@ -443,6 +447,65 @@ program
       console.log(`promptArtifactPath: ${report.promptArtifactPath}`);
     }
     console.log(report.prompt);
+  });
+
+program
+  .command("history")
+  .description("List recent doctor, preview, and run artifacts from the artifacts directory.")
+  .option("--cwd <path>", "Base working directory.", process.cwd())
+  .option(
+    "--kind <kind>",
+    `Artifact kind filter: ${HISTORY_KINDS.join(", ")}`,
+    "all"
+  )
+  .option("--limit <count>", "Maximum number of entries to return.", "20")
+  .option("-c, --config <path>", "Path to a JSON/YAML config file.")
+  .option("--json", "Print JSON output.")
+  .action((options: {
+    cwd: string;
+    kind: string;
+    limit: string;
+    config?: string;
+    json?: boolean;
+  }) => {
+    const cwd = path.resolve(options.cwd);
+    const context = createContext(options.config, cwd, Boolean(options.json));
+
+    if (!(HISTORY_KINDS as readonly string[]).includes(options.kind)) {
+      throw new Error(
+        `Unsupported history kind "${options.kind}". Expected one of: ${HISTORY_KINDS.join(", ")}`
+      );
+    }
+
+    const report = context.history.list({
+      cwd,
+      kind: options.kind as (typeof HISTORY_KINDS)[number],
+      limit: Number(options.limit)
+    });
+
+    if (options.json) {
+      printJson(report);
+      return;
+    }
+
+    console.log(`rootDir: ${report.rootDir}`);
+    console.log(`filter: ${report.filter}`);
+    console.log(`returned: ${report.returnedEntries}/${report.totalEntries}`);
+
+    for (const entry of report.entries) {
+      console.log(`${entry.kind}: ${entry.createdAt}`);
+      console.log(`  summary: ${entry.summary}`);
+      console.log(`  path: ${entry.path}`);
+      if (entry.status) {
+        console.log(`  status: ${entry.status}`);
+      }
+      if (entry.taskType) {
+        console.log(`  taskType: ${entry.taskType}`);
+      }
+      if (entry.selectedAgent) {
+        console.log(`  selectedAgent: ${entry.selectedAgent}`);
+      }
+    }
   });
 
 program

@@ -28,7 +28,7 @@
 - 规则路由与 fallback
 - 结构化输出解析：支持 JSON / JSON 数组 / JSONL / `===RESULT_JSON===` / Markdown JSON code block，并会继续尝试从事件 envelope 中提取最终结构化内容
 - YAML / JSON 配置与 `zod` 校验
-- 本地 CLI 入口：`list` / `detect` / `doctor` / `route` / `prompt` / `run`
+- 本地 CLI 入口：`list` / `detect` / `doctor` / `route` / `prompt` / `history` / `run`
 - 基础单元测试，包含 `child_process.spawn` mock
 
 ## 目录结构
@@ -81,6 +81,7 @@ node .\dist\cli\index.js detect
 node .\dist\cli\index.js doctor
 node .\dist\cli\index.js route --task fix --cwd . --detect
 node .\dist\cli\index.js prompt --task summarize --input-file .\demo\issue.txt --cwd .
+node .\dist\cli\index.js history --limit 10
 node .\dist\cli\index.js run --task summarize --input-file .\demo\issue.txt --cwd .
 ```
 
@@ -92,6 +93,7 @@ node ./dist/cli/index.js detect
 node ./dist/cli/index.js doctor --json
 node ./dist/cli/index.js route --task review --cwd . --json
 node ./dist/cli/index.js prompt --task summarize --input-file ./demo/issue.txt --cwd . --json
+node ./dist/cli/index.js history --kind preview --json
 node ./dist/cli/index.js run --task review --input-file ./demo/review.diff.txt --cwd .
 ```
 
@@ -132,6 +134,7 @@ node .\dist\cli\index.js doctor --agent copilot --smoke --json
 node .\dist\cli\index.js doctor --agent qwen --smoke --fail-on-unhealthy
 node .\dist\cli\index.js route --task review --agent codex --cwd . --detect --json
 node .\dist\cli\index.js prompt --task summarize --input-file .\demo\issue.txt --cwd . --json
+node .\dist\cli\index.js history --kind preview --limit 5 --json
 ```
 
 5. 再跑 demo：
@@ -316,6 +319,22 @@ node .\dist\cli\index.js prompt --task review --input-file .\demo\review.diff.tx
 - 调试 PromptBuilder 模板
 - 先确认结构化输出约束是否符合预期
 - 在真正执行前检查 prompt 是否过长、是否包含了正确上下文
+
+### `history`
+
+查看 `artifacts/` 目录里的最近产物，包括 doctor 报告、route/prompt 预览和实际运行结果。
+
+```powershell
+node .\dist\cli\index.js history
+node .\dist\cli\index.js history --kind preview --limit 5 --json
+node .\dist\cli\index.js history --kind run --limit 10
+```
+
+这个命令适合：
+
+- 快速回看最近一次 smoke / preview / run 发生了什么
+- 不手动翻目录，直接定位对应 artifact 路径
+- 在脚本里提取最近的 doctor / preview / run 记录
 
 ### `run`
 
