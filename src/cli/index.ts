@@ -15,6 +15,7 @@ import { ArtifactHistoryService, HISTORY_KINDS } from "../core/history";
 import { PreviewService } from "../core/preview";
 import { PromptBuilder } from "../core/prompt-builder";
 import { Router } from "../core/router";
+import { loadTaskFile } from "../core/task-file";
 import { AGENT_NAMES, AgentName, TASK_TYPES, Task } from "../core/task";
 import { ProcessRunner } from "../process/process-runner";
 import { readTextFile } from "../utils/fs";
@@ -30,16 +31,25 @@ interface Context {
   logger: Logger;
 }
 
-async function readPrompt(prompt?: string, inputFile?: string): Promise<string> {
-  if (prompt) {
-    return prompt;
+async function resolvePromptFromSources(options: {
+  prompt?: string;
+  inputFile?: string;
+  taskPrompt?: string;
+  requirePrompt: boolean;
+}): Promise<string | undefined> {
+  if (options.prompt) {
+    return options.prompt;
   }
 
-  if (inputFile) {
-    return readTextFile(path.resolve(inputFile));
+  if (options.inputFile) {
+    return readTextFile(path.resolve(options.inputFile));
   }
 
-  if (!process.stdin.isTTY) {
+  if (options.taskPrompt !== undefined) {
+    return options.taskPrompt;
+  }
+
+  if (options.requirePrompt && !process.stdin.isTTY) {
     const chunks: string[] = [];
     for await (const chunk of process.stdin) {
       chunks.push(chunk.toString());
@@ -47,7 +57,13 @@ async function readPrompt(prompt?: string, inputFile?: string): Promise<string> 
     return chunks.join("");
   }
 
-  throw new Error("Provide --prompt, --input-file, or pipe content through stdin.");
+  if (options.requirePrompt) {
+    throw new Error(
+      "Provide --prompt, --input-file, pipe content through stdin, or use --task-file with prompt/promptFile."
+    );
+  }
+
+  return undefined;
 }
 
 function resolveLogPath(config: AppConfig, cwd: string): string | undefined {
@@ -125,28 +141,59 @@ function parseTaskType(input: string): Task["type"] {
 }
 
 function buildTaskFromCliOptions(options: {
-  task: string;
-  agent: string;
-  cwd: string;
+  task?: string;
+  agent?: string;
+  cwd?: string;
   title?: string;
   fallback?: string[];
   timeoutMs?: string;
-  prompt: string;
-}): Task {
-  const preferredAgent =
-    options.agent === "auto" ? "auto" : parseAgentName(options.agent);
-  const fallbackAgents = (options.fallback ?? []).map(parseAgentName);
+  prompt?: string;
+  inputFile?: string;
+  taskFile?: string;
+  requirePrompt: boolean;
+}): Promise<{ task: Task; taskFilePath?: string }> {
+  return (async () => {
+    const loaded = options.taskFile
+      ? loadTaskFile(options.taskFile, options.cwd ?? process.cwd())
+      : undefined;
+    const resolvedCwd = path.resolve(
+      options.cwd ?? loaded?.task.cwd ?? process.cwd()
+    );
+    const prompt = await resolvePromptFromSources({
+      prompt: options.prompt,
+      inputFile: options.inputFile,
+      taskPrompt: loaded?.task.prompt,
+      requirePrompt: options.requirePrompt
+    });
+    const preferredAgentSource =
+      options.agent ?? loaded?.task.preferredAgent ?? "auto";
+    const preferredAgent =
+      preferredAgentSource === "auto"
+        ? "auto"
+        : parseAgentName(preferredAgentSource);
+    const fallbackSource = options.fallback ?? loaded?.task.fallbackAgents ?? [];
 
-  return {
-    id: randomUUID(),
-    type: parseTaskType(options.task),
-    title: options.title,
-    prompt: options.prompt,
-    cwd: options.cwd,
-    preferredAgent,
-    fallbackAgents,
-    timeoutMs: options.timeoutMs ? Number(options.timeoutMs) : undefined
-  };
+    if (!options.task && !loaded?.task.type) {
+      throw new Error("Provide --task or use --task-file with a type field.");
+    }
+
+    return {
+      taskFilePath: loaded?.taskFilePath,
+      task: {
+        id: loaded?.task.id ?? randomUUID(),
+        type: parseTaskType(options.task ?? loaded?.task.type ?? ""),
+        title: options.title ?? loaded?.task.title,
+        prompt: prompt ?? "",
+        cwd: resolvedCwd,
+        metadata: loaded?.task.metadata,
+        preferredAgent,
+        fallbackAgents: fallbackSource.map(parseAgentName),
+        timeoutMs: options.timeoutMs
+          ? Number(options.timeoutMs)
+          : loaded?.task.timeoutMs
+      }
+    };
+  })();
 }
 
 const program = new Command();
@@ -322,33 +369,36 @@ program
 program
   .command("route")
   .description("Preview router ordering and optional detection state without running any agent.")
-  .requiredOption("--task <type>", `Task type: ${TASK_TYPES.join(", ")}`)
-  .option("--agent <name>", `Preferred agent or auto`, "auto")
+  .option("--task <type>", `Task type: ${TASK_TYPES.join(", ")}`)
+  .option("--task-file <path>", "Load a full task definition from a JSON/YAML file.")
+  .option("--agent <name>", `Preferred agent or auto`)
   .option("--fallback <agents...>", "Fallback agents in order.")
-  .option("--cwd <path>", "Task working directory.", process.cwd())
+  .option("--cwd <path>", "Task working directory.")
   .option("--title <text>", "Optional task title.")
   .option("--detect", "Include live adapter detection details for routed agents.")
   .option("-c, --config <path>", "Path to a JSON/YAML config file.")
   .option("--json", "Print JSON output.")
   .action(async (options: {
     task: string;
-    agent: string;
+    taskFile?: string;
+    agent?: string;
     fallback?: string[];
-    cwd: string;
+    cwd?: string;
     title?: string;
     detect?: boolean;
     config?: string;
     json?: boolean;
   }) => {
-    const cwd = path.resolve(options.cwd);
+    const cwd = path.resolve(options.cwd ?? process.cwd());
     const context = createContext(options.config, cwd, Boolean(options.json));
-    const task = buildTaskFromCliOptions({
+    const { task, taskFilePath } = await buildTaskFromCliOptions({
       task: options.task,
+      taskFile: options.taskFile,
       agent: options.agent,
       fallback: options.fallback,
-      cwd,
+      cwd: options.cwd,
       title: options.title,
-      prompt: ""
+      requirePrompt: false
     });
 
     const report = await context.preview.inspectRoute(task, {
@@ -363,6 +413,9 @@ program
     console.log(`taskId: ${report.task.id}`);
     console.log(`taskType: ${report.task.type}`);
     console.log(`orderedAgents: ${report.route.orderedAgents.join(" -> ") || "(none)"}`);
+    if (taskFilePath) {
+      console.log(`taskFile: ${taskFilePath}`);
+    }
     if (report.artifactPath) {
       console.log(`artifactPath: ${report.artifactPath}`);
     }
@@ -394,9 +447,10 @@ program
 program
   .command("prompt")
   .description("Preview the final orchestrator prompt without running any agent.")
-  .requiredOption("--task <type>", `Task type: ${TASK_TYPES.join(", ")}`)
-  .option("--agent <name>", `Preferred agent or auto`, "auto")
-  .option("--cwd <path>", "Task working directory.", process.cwd())
+  .option("--task <type>", `Task type: ${TASK_TYPES.join(", ")}`)
+  .option("--task-file <path>", "Load a full task definition from a JSON/YAML file.")
+  .option("--agent <name>", `Preferred agent or auto`)
+  .option("--cwd <path>", "Task working directory.")
   .option("--title <text>", "Optional task title.")
   .option("--prompt <text>", "Prompt text supplied directly.")
   .option("--input-file <path>", "Read prompt text from a file.")
@@ -406,8 +460,9 @@ program
   .option("--json", "Print JSON output.")
   .action(async (options: {
     task: string;
-    agent: string;
-    cwd: string;
+    taskFile?: string;
+    agent?: string;
+    cwd?: string;
     title?: string;
     prompt?: string;
     inputFile?: string;
@@ -416,17 +471,19 @@ program
     config?: string;
     json?: boolean;
   }) => {
-    const cwd = path.resolve(options.cwd);
-    const prompt = await readPrompt(options.prompt, options.inputFile);
+    const cwd = path.resolve(options.cwd ?? process.cwd());
     const context = createContext(options.config, cwd, Boolean(options.json));
-    const task = buildTaskFromCliOptions({
+    const { task, taskFilePath } = await buildTaskFromCliOptions({
       task: options.task,
+      taskFile: options.taskFile,
       agent: options.agent,
       fallback: options.fallback,
-      cwd,
+      cwd: options.cwd,
       title: options.title,
       timeoutMs: options.timeoutMs,
-      prompt
+      prompt: options.prompt,
+      inputFile: options.inputFile,
+      requirePrompt: true
     });
 
     const report = await context.preview.previewPrompt(task);
@@ -440,6 +497,9 @@ program
     console.log(`taskType: ${report.task.type}`);
     console.log(`promptLength: ${report.promptLength}`);
     console.log(`orderedAgents: ${report.route.orderedAgents.join(" -> ") || "(none)"}`);
+    if (taskFilePath) {
+      console.log(`taskFile: ${taskFilePath}`);
+    }
     if (report.artifactPath) {
       console.log(`artifactPath: ${report.artifactPath}`);
     }
@@ -511,9 +571,10 @@ program
 program
   .command("run")
   .description("Run a task through the router/orchestrator.")
-  .requiredOption("--task <type>", `Task type: ${TASK_TYPES.join(", ")}`)
-  .option("--agent <name>", `Preferred agent or auto`, "auto")
-  .option("--cwd <path>", "Task working directory.", process.cwd())
+  .option("--task <type>", `Task type: ${TASK_TYPES.join(", ")}`)
+  .option("--task-file <path>", "Load a full task definition from a JSON/YAML file.")
+  .option("--agent <name>", `Preferred agent or auto`)
+  .option("--cwd <path>", "Task working directory.")
   .option("--title <text>", "Optional task title.")
   .option("--prompt <text>", "Prompt text supplied directly.")
   .option("--input-file <path>", "Read prompt text from a file.")
@@ -525,8 +586,9 @@ program
   .action(
     async (options: {
       task: string;
-      agent: string;
-      cwd: string;
+      taskFile?: string;
+      agent?: string;
+      cwd?: string;
       title?: string;
       prompt?: string;
       inputFile?: string;
@@ -536,17 +598,19 @@ program
       json?: boolean;
       dryRun?: boolean;
     }) => {
-      const cwd = path.resolve(options.cwd);
-      const prompt = await readPrompt(options.prompt, options.inputFile);
+      const cwd = path.resolve(options.cwd ?? process.cwd());
       const context = createContext(options.config, cwd, Boolean(options.json));
-      const task = buildTaskFromCliOptions({
+      const { task, taskFilePath } = await buildTaskFromCliOptions({
         task: options.task,
+        taskFile: options.taskFile,
         agent: options.agent,
         fallback: options.fallback,
-        cwd,
+        cwd: options.cwd,
         title: options.title,
         timeoutMs: options.timeoutMs,
-        prompt
+        prompt: options.prompt,
+        inputFile: options.inputFile,
+        requirePrompt: true
       });
 
       const result = await context.orchestrator.run(task, {
@@ -561,6 +625,9 @@ program
       console.log(`taskId: ${result.taskId}`);
       console.log(`success: ${result.success}`);
       console.log(`selectedAgent: ${result.selectedAgent ?? "none"}`);
+      if (taskFilePath) {
+        console.log(`taskFile: ${taskFilePath}`);
+      }
       console.log(`artifactDir: ${result.artifactDir}`);
 
       for (const attempt of result.attempts) {
