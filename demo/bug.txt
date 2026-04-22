@@ -1,0 +1,6 @@
+Bug: the orchestrator should fall back to another agent when the first agent executable cannot be found.
+Expected behavior:
+- detect codex as unavailable
+- automatically retry with qwen or copilot according to routing rules
+- return a structured fix plan rather than crashing
+

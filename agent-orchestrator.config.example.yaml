@@ -1,0 +1,126 @@
+logging:
+  level: info
+  saveLogsToFile: true
+
+runtime:
+  detectTimeoutMs: 5000
+  maxPromptArgLength: 4000
+
+artifacts:
+  rootDir: artifacts
+  saveOutputs: true
+  savePromptFiles: true
+  saveLogs: true
+
+routing:
+  routes:
+    summarize: [copilot, qwen, codex]
+    review: [codex, copilot, qwen]
+    fix: [codex, qwen, copilot]
+    plan: [copilot, qwen, codex]
+
+agents:
+  codex:
+    enabled: true
+    commandCandidates: [codex, codex.exe, codex.cmd]
+    defaultArgs: []
+    inputModePriority: [stdin, file, args]
+    timeoutMs: 120000
+    retries: 1
+    env: {}
+    detect:
+      versionArgs:
+        - [--version]
+        - [version]
+      helpArgs:
+        - [--help]
+        - [-h]
+    run:
+      stdinArgs: []
+      promptFileArgs:
+        - --prompt-file
+        - "{promptFile}"
+      promptArgArgs:
+        - --prompt
+        - "{prompt}"
+      jsonModeArgs: []
+      nonInteractiveArgs: []
+      cwdArgs: []
+    capabilities:
+      supportsStdin: true
+      supportsPromptFile: true
+      supportsArgs: true
+      supportsJsonMode: true
+      supportsCwd: true
+      supportsNonInteractive: true
+    notes:
+      - Update run templates if your Codex CLI uses different prompt flags or subcommands.
+
+  copilot:
+    enabled: true
+    commandCandidates: [github-copilot, copilot, copilot.exe, copilot.cmd]
+    defaultArgs: []
+    inputModePriority: [stdin, file, args]
+    timeoutMs: 120000
+    retries: 1
+    env: {}
+    detect:
+      versionArgs:
+        - [--version]
+      helpArgs:
+        - [--help]
+    run:
+      stdinArgs: []
+      promptFileArgs:
+        - --prompt-file
+        - "{promptFile}"
+      promptArgArgs:
+        - --prompt
+        - "{prompt}"
+      jsonModeArgs: []
+      nonInteractiveArgs: []
+      cwdArgs: []
+    capabilities:
+      supportsStdin: true
+      supportsPromptFile: true
+      supportsArgs: true
+      supportsJsonMode: true
+      supportsCwd: true
+      supportsNonInteractive: true
+    notes:
+      - Copilot CLI variants differ; customize commandCandidates and defaultArgs as needed.
+
+  qwen:
+    enabled: true
+    commandCandidates: [qwen, qwen.exe, qwen.cmd, opencode, opencode.exe, opencode.cmd]
+    defaultArgs: []
+    inputModePriority: [stdin, file, args]
+    timeoutMs: 120000
+    retries: 1
+    env: {}
+    detect:
+      versionArgs:
+        - [--version]
+      helpArgs:
+        - [--help]
+    run:
+      stdinArgs: []
+      promptFileArgs:
+        - --prompt-file
+        - "{promptFile}"
+      promptArgArgs:
+        - --prompt
+        - "{prompt}"
+      jsonModeArgs: []
+      nonInteractiveArgs: []
+      cwdArgs: []
+    capabilities:
+      supportsStdin: true
+      supportsPromptFile: true
+      supportsArgs: true
+      supportsJsonMode: true
+      supportsCwd: true
+      supportsNonInteractive: true
+    notes:
+      - This adapter can target Qwen or OpenCode style CLIs via configuration only.
+

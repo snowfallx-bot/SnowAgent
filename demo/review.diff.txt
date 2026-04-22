@@ -1,0 +1,15 @@
+diff --git a/src/cache.ts b/src/cache.ts
+index 1111111..2222222 100644
+--- a/src/cache.ts
++++ b/src/cache.ts
+@@ -10,6 +10,10 @@ export async function loadCache(cachePath: string): Promise<string> {
+   if (!fs.existsSync(cachePath)) {
+     return "";
+   }
++  if (fs.statSync(cachePath).size > 1024 * 1024 * 100) {
++    return "";
++  }
++
+   return fs.readFileSync(cachePath, "utf8");
+ }
+

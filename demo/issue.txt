@@ -1,0 +1,4 @@
+Users report that the settings page takes more than 15 seconds to load after the latest release.
+The problem happens more often on Windows, and logs show repeated retries against the same local cache file.
+Please summarize the issue and suggest the most likely next action.
+
