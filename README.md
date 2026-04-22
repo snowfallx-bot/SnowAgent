@@ -28,7 +28,7 @@
 - 规则路由与 fallback
 - 结构化输出解析：支持 JSON / JSON 数组 / JSONL / `===RESULT_JSON===` / Markdown JSON code block，并会继续尝试从事件 envelope 中提取最终结构化内容
 - YAML / JSON 配置与 `zod` 校验
-- 本地 CLI 入口：`list` / `config` / `detect` / `doctor` / `route` / `prompt` / `history` / `run`
+- 本地 CLI 入口：`list` / `config` / `detect` / `doctor` / `route` / `prompt` / `history` / `batch` / `run`
 - 基础单元测试，包含 `child_process.spawn` mock
 
 ## 目录结构
@@ -83,6 +83,7 @@ node .\dist\cli\index.js doctor
 node .\dist\cli\index.js route --task fix --cwd . --detect
 node .\dist\cli\index.js prompt --task summarize --input-file .\demo\issue.txt --cwd .
 node .\dist\cli\index.js history --limit 10
+node .\dist\cli\index.js batch --plan-file .\demo\demo.batch.yaml --dry-run
 node .\dist\cli\index.js run --task summarize --input-file .\demo\issue.txt --cwd .
 ```
 
@@ -96,6 +97,7 @@ node ./dist/cli/index.js doctor --json
 node ./dist/cli/index.js route --task review --cwd . --json
 node ./dist/cli/index.js prompt --task summarize --input-file ./demo/issue.txt --cwd . --json
 node ./dist/cli/index.js history --kind preview --json
+node ./dist/cli/index.js batch --plan-file ./demo/demo.batch.yaml --dry-run --json
 node ./dist/cli/index.js run --task review --input-file ./demo/review.diff.txt --cwd .
 ```
 
@@ -138,6 +140,7 @@ node .\dist\cli\index.js config --agent copilot --json
 node .\dist\cli\index.js route --task review --agent codex --cwd . --detect --json
 node .\dist\cli\index.js prompt --task summarize --input-file .\demo\issue.txt --cwd . --json
 node .\dist\cli\index.js history --kind preview --limit 5 --json
+node .\dist\cli\index.js batch --plan-file .\demo\demo.batch.yaml --dry-run --json
 node .\dist\cli\index.js run --task-file .\demo\summarize.task.yaml --dry-run --json
 ```
 
@@ -229,6 +232,8 @@ metadata:
 - `promptFile`、`cwd` 都按任务文件所在目录解析相对路径
 - CLI 显式参数会覆盖任务文件中的同名字段
 - 仓库已提供 `demo/*.task.yaml` 作为样例
+
+如果你想顺序运行多个任务文件，可以使用批量计划文件，例如仓库自带的 [demo/demo.batch.yaml](</c:/Users/vmwin11/Desktop/SnowAgent/demo/demo.batch.yaml>)。
 
 ### 为什么不能硬编码 CLI 参数
 
@@ -386,6 +391,33 @@ node .\dist\cli\index.js history --kind run --limit 10
 - 不手动翻目录，直接定位对应 artifact 路径
 - 在脚本里提取最近的 doctor / preview / run 记录
 
+### `batch`
+
+顺序执行一个批量计划文件，计划文件里引用多个 `task-file`。
+
+```powershell
+node .\dist\cli\index.js batch --plan-file .\demo\demo.batch.yaml --dry-run
+node .\dist\cli\index.js batch --plan-file .\demo\demo.batch.yaml --dry-run --json
+node .\dist\cli\index.js batch --plan-file .\demo\demo.batch.yaml --fail-on-error
+```
+
+批量计划文件示例：
+
+```yaml
+continueOnError: true
+tasks:
+  - path: ./summarize.task.yaml
+    label: summarize-demo
+  - path: ./review.task.yaml
+    label: review-demo
+```
+
+这个命令适合：
+
+- 你离开电脑时，顺序跑一组固定 task-file
+- 先用 `--dry-run` 验证一整批任务的路由和命令构建
+- 输出一份批量汇总报告，方便后续脚本读取
+
 ### `run`
 
 执行标准任务。
@@ -453,6 +485,7 @@ PromptBuilder 会要求 agent 输出：
 - `doctor/*.json`
 - `previews/*.json`
 - `previews/*.txt`
+- `batches/*.json`
 - `<task-id>-<timestamp>/task-prompt.txt`
 - `<task-id>-<timestamp>/<agent>-result.json`
 - `<task-id>-<timestamp>/orchestration-result.json`

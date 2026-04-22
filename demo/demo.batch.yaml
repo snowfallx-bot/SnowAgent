@@ -1,0 +1,8 @@
+continueOnError: true
+tasks:
+  - path: ./summarize.task.yaml
+    label: summarize-demo
+  - path: ./review.task.yaml
+    label: review-demo
+  - path: ./fix.task.yaml
+    label: fix-demo

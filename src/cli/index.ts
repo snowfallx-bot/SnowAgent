@@ -9,6 +9,7 @@ import { Command } from "commander";
 import { AgentRegistry } from "../agents/registry";
 import { loadConfig } from "../config/load-config";
 import { AppConfig } from "../config/schema";
+import { BatchRunnerService, loadBatchPlan } from "../core/batch";
 import { Orchestrator } from "../core/orchestrator";
 import { ConfigReportService } from "../core/config-report";
 import { Doctor } from "../core/doctor";
@@ -27,6 +28,7 @@ interface Context {
   configPath?: string;
   registry: AgentRegistry;
   orchestrator: Orchestrator;
+  batch: BatchRunnerService;
   doctor: Doctor;
   preview: PreviewService;
   history: ArtifactHistoryService;
@@ -103,6 +105,7 @@ function createContext(
     new PromptBuilder(),
     logger
   );
+  const batch = new BatchRunnerService(config, orchestrator);
   const preview = new PreviewService(
     config,
     registry,
@@ -118,6 +121,7 @@ function createContext(
     configPath: resolvedConfigPath,
     registry,
     orchestrator,
+    batch,
     doctor,
     preview,
     history,
@@ -633,6 +637,73 @@ program
       if (entry.selectedAgent) {
         console.log(`  selectedAgent: ${entry.selectedAgent}`);
       }
+    }
+  });
+
+program
+  .command("batch")
+  .description("Run a batch plan that references multiple task files.")
+  .requiredOption("--plan-file <path>", "Path to a JSON/YAML batch plan file.")
+  .option("--cwd <path>", "Base working directory.", process.cwd())
+  .option("--dry-run", "Build commands and orchestration flow without launching agent processes.")
+  .option("--fail-on-error", "Exit with code 1 if any task in the batch fails.")
+  .option("-c, --config <path>", "Path to a JSON/YAML config file.")
+  .option("--json", "Print JSON output.")
+  .action(async (options: {
+    planFile: string;
+    cwd: string;
+    dryRun?: boolean;
+    failOnError?: boolean;
+    config?: string;
+    json?: boolean;
+  }) => {
+    const cwd = path.resolve(options.cwd);
+    const context = createContext(options.config, cwd, Boolean(options.json));
+    const plan = loadBatchPlan(options.planFile, cwd);
+    const report = await context.batch.runPlan(plan, {
+      dryRun: Boolean(options.dryRun)
+    });
+
+    if (options.json) {
+      printJson(report);
+      if (options.failOnError && report.failedTasks > 0) {
+        process.exitCode = 1;
+      }
+      return;
+    }
+
+    console.log(`planFile: ${report.planFilePath}`);
+    console.log(`dryRun: ${report.dryRun}`);
+    console.log(`continueOnError: ${report.continueOnError}`);
+    console.log(
+      `summary: succeeded=${report.succeededTasks} failed=${report.failedTasks} total=${report.totalTasks} stoppedEarly=${report.stoppedEarly}`
+    );
+    if (report.artifactPath) {
+      console.log(`artifactPath: ${report.artifactPath}`);
+    }
+
+    for (const result of report.results) {
+      console.log(`${result.label ?? path.basename(result.taskFilePath)}: ${result.success ? "success" : "failed"}`);
+      console.log(`  taskFile: ${result.taskFilePath}`);
+      if (result.taskType) {
+        console.log(`  taskType: ${result.taskType}`);
+      }
+      if (result.taskId) {
+        console.log(`  taskId: ${result.taskId}`);
+      }
+      if (result.selectedAgent) {
+        console.log(`  selectedAgent: ${result.selectedAgent}`);
+      }
+      if (result.artifactDir) {
+        console.log(`  artifactDir: ${result.artifactDir}`);
+      }
+      if (result.error) {
+        console.log(`  error: ${result.error}`);
+      }
+    }
+
+    if (options.failOnError && report.failedTasks > 0) {
+      process.exitCode = 1;
     }
   });
 
