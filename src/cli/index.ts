@@ -11,6 +11,7 @@ import { loadConfig } from "../config/load-config";
 import { AppConfig } from "../config/schema";
 import { Orchestrator } from "../core/orchestrator";
 import { Doctor } from "../core/doctor";
+import { PreviewService } from "../core/preview";
 import { PromptBuilder } from "../core/prompt-builder";
 import { Router } from "../core/router";
 import { AGENT_NAMES, AgentName, TASK_TYPES, Task } from "../core/task";
@@ -23,6 +24,7 @@ interface Context {
   registry: AgentRegistry;
   orchestrator: Orchestrator;
   doctor: Doctor;
+  preview: PreviewService;
   logger: Logger;
 }
 
@@ -80,6 +82,12 @@ function createContext(
     new PromptBuilder(),
     logger
   );
+  const preview = new PreviewService(
+    config,
+    registry,
+    new Router(config),
+    new PromptBuilder()
+  );
   const doctor = new Doctor(config, registry);
 
   return {
@@ -87,6 +95,7 @@ function createContext(
     registry,
     orchestrator,
     doctor,
+    preview,
     logger
   };
 }
@@ -101,6 +110,39 @@ function parseAgentName(input: string): AgentName {
   }
 
   throw new Error(`Unsupported agent "${input}". Expected one of: ${AGENT_NAMES.join(", ")}`);
+}
+
+function parseTaskType(input: string): Task["type"] {
+  if ((TASK_TYPES as readonly string[]).includes(input)) {
+    return input as Task["type"];
+  }
+
+  throw new Error(`Unsupported task type "${input}". Expected one of: ${TASK_TYPES.join(", ")}`);
+}
+
+function buildTaskFromCliOptions(options: {
+  task: string;
+  agent: string;
+  cwd: string;
+  title?: string;
+  fallback?: string[];
+  timeoutMs?: string;
+  prompt: string;
+}): Task {
+  const preferredAgent =
+    options.agent === "auto" ? "auto" : parseAgentName(options.agent);
+  const fallbackAgents = (options.fallback ?? []).map(parseAgentName);
+
+  return {
+    id: randomUUID(),
+    type: parseTaskType(options.task),
+    title: options.title,
+    prompt: options.prompt,
+    cwd: options.cwd,
+    preferredAgent,
+    fallbackAgents,
+    timeoutMs: options.timeoutMs ? Number(options.timeoutMs) : undefined
+  };
 }
 
 const program = new Command();
@@ -274,6 +316,136 @@ program
   });
 
 program
+  .command("route")
+  .description("Preview router ordering and optional detection state without running any agent.")
+  .requiredOption("--task <type>", `Task type: ${TASK_TYPES.join(", ")}`)
+  .option("--agent <name>", `Preferred agent or auto`, "auto")
+  .option("--fallback <agents...>", "Fallback agents in order.")
+  .option("--cwd <path>", "Task working directory.", process.cwd())
+  .option("--title <text>", "Optional task title.")
+  .option("--detect", "Include live adapter detection details for routed agents.")
+  .option("-c, --config <path>", "Path to a JSON/YAML config file.")
+  .option("--json", "Print JSON output.")
+  .action(async (options: {
+    task: string;
+    agent: string;
+    fallback?: string[];
+    cwd: string;
+    title?: string;
+    detect?: boolean;
+    config?: string;
+    json?: boolean;
+  }) => {
+    const cwd = path.resolve(options.cwd);
+    const context = createContext(options.config, cwd, Boolean(options.json));
+    const task = buildTaskFromCliOptions({
+      task: options.task,
+      agent: options.agent,
+      fallback: options.fallback,
+      cwd,
+      title: options.title,
+      prompt: ""
+    });
+
+    const report = await context.preview.inspectRoute(task, {
+      includeDetection: Boolean(options.detect)
+    });
+
+    if (options.json) {
+      printJson(report);
+      return;
+    }
+
+    console.log(`taskId: ${report.task.id}`);
+    console.log(`taskType: ${report.task.type}`);
+    console.log(`orderedAgents: ${report.route.orderedAgents.join(" -> ") || "(none)"}`);
+    if (report.artifactPath) {
+      console.log(`artifactPath: ${report.artifactPath}`);
+    }
+    for (const reason of report.route.reasons) {
+      console.log(`reason: ${reason}`);
+    }
+    for (const agent of report.agents) {
+      console.log(`${agent.agentName}: ${agent.enabled ? "enabled" : "disabled"}`);
+      if (agent.detection) {
+        console.log(
+          `  detection: ${agent.detection.available ? "available" : "unavailable"}`
+        );
+        if (agent.detection.executable) {
+          console.log(`  executable: ${agent.detection.executable}`);
+        }
+        if (agent.detection.error) {
+          console.log(`  error: ${agent.detection.error}`);
+        }
+      }
+      for (const note of agent.configNotes) {
+        console.log(`  note: ${note}`);
+      }
+      for (const note of agent.detection?.notes ?? []) {
+        console.log(`  detectNote: ${note}`);
+      }
+    }
+  });
+
+program
+  .command("prompt")
+  .description("Preview the final orchestrator prompt without running any agent.")
+  .requiredOption("--task <type>", `Task type: ${TASK_TYPES.join(", ")}`)
+  .option("--agent <name>", `Preferred agent or auto`, "auto")
+  .option("--cwd <path>", "Task working directory.", process.cwd())
+  .option("--title <text>", "Optional task title.")
+  .option("--prompt <text>", "Prompt text supplied directly.")
+  .option("--input-file <path>", "Read prompt text from a file.")
+  .option("--fallback <agents...>", "Fallback agents in order.")
+  .option("--timeout-ms <ms>", "Task-level timeout override.")
+  .option("-c, --config <path>", "Path to a JSON/YAML config file.")
+  .option("--json", "Print JSON output.")
+  .action(async (options: {
+    task: string;
+    agent: string;
+    cwd: string;
+    title?: string;
+    prompt?: string;
+    inputFile?: string;
+    fallback?: string[];
+    timeoutMs?: string;
+    config?: string;
+    json?: boolean;
+  }) => {
+    const cwd = path.resolve(options.cwd);
+    const prompt = await readPrompt(options.prompt, options.inputFile);
+    const context = createContext(options.config, cwd, Boolean(options.json));
+    const task = buildTaskFromCliOptions({
+      task: options.task,
+      agent: options.agent,
+      fallback: options.fallback,
+      cwd,
+      title: options.title,
+      timeoutMs: options.timeoutMs,
+      prompt
+    });
+
+    const report = await context.preview.previewPrompt(task);
+
+    if (options.json) {
+      printJson(report);
+      return;
+    }
+
+    console.log(`taskId: ${report.task.id}`);
+    console.log(`taskType: ${report.task.type}`);
+    console.log(`promptLength: ${report.promptLength}`);
+    console.log(`orderedAgents: ${report.route.orderedAgents.join(" -> ") || "(none)"}`);
+    if (report.artifactPath) {
+      console.log(`artifactPath: ${report.artifactPath}`);
+    }
+    if (report.promptArtifactPath) {
+      console.log(`promptArtifactPath: ${report.promptArtifactPath}`);
+    }
+    console.log(report.prompt);
+  });
+
+program
   .command("run")
   .description("Run a task through the router/orchestrator.")
   .requiredOption("--task <type>", `Task type: ${TASK_TYPES.join(", ")}`)
@@ -304,25 +476,15 @@ program
       const cwd = path.resolve(options.cwd);
       const prompt = await readPrompt(options.prompt, options.inputFile);
       const context = createContext(options.config, cwd, Boolean(options.json));
-
-      if (!(TASK_TYPES as readonly string[]).includes(options.task)) {
-        throw new Error(`Unsupported task type "${options.task}".`);
-      }
-
-      const preferredAgent =
-        options.agent === "auto" ? "auto" : parseAgentName(options.agent);
-      const fallbackAgents = (options.fallback ?? []).map(parseAgentName);
-
-      const task: Task = {
-        id: randomUUID(),
-        type: options.task as Task["type"],
-        title: options.title,
-        prompt,
+      const task = buildTaskFromCliOptions({
+        task: options.task,
+        agent: options.agent,
+        fallback: options.fallback,
         cwd,
-        preferredAgent,
-        fallbackAgents,
-        timeoutMs: options.timeoutMs ? Number(options.timeoutMs) : undefined
-      };
+        title: options.title,
+        timeoutMs: options.timeoutMs,
+        prompt
+      });
 
       const result = await context.orchestrator.run(task, {
         dryRun: Boolean(options.dryRun)

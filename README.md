@@ -28,7 +28,7 @@
 - 规则路由与 fallback
 - 结构化输出解析：支持 JSON / JSON 数组 / JSONL / `===RESULT_JSON===` / Markdown JSON code block，并会继续尝试从事件 envelope 中提取最终结构化内容
 - YAML / JSON 配置与 `zod` 校验
-- 本地 CLI 入口：`list` / `detect` / `doctor` / `run`
+- 本地 CLI 入口：`list` / `detect` / `doctor` / `route` / `prompt` / `run`
 - 基础单元测试，包含 `child_process.spawn` mock
 
 ## 目录结构
@@ -79,6 +79,8 @@ PowerShell 5.x：
 node .\dist\cli\index.js list
 node .\dist\cli\index.js detect
 node .\dist\cli\index.js doctor
+node .\dist\cli\index.js route --task fix --cwd . --detect
+node .\dist\cli\index.js prompt --task summarize --input-file .\demo\issue.txt --cwd .
 node .\dist\cli\index.js run --task summarize --input-file .\demo\issue.txt --cwd .
 ```
 
@@ -88,6 +90,8 @@ PowerShell 7.x：
 node ./dist/cli/index.js list
 node ./dist/cli/index.js detect
 node ./dist/cli/index.js doctor --json
+node ./dist/cli/index.js route --task review --cwd . --json
+node ./dist/cli/index.js prompt --task summarize --input-file ./demo/issue.txt --cwd . --json
 node ./dist/cli/index.js run --task review --input-file ./demo/review.diff.txt --cwd .
 ```
 
@@ -126,6 +130,8 @@ node .\dist\cli\index.js detect --json
 node .\dist\cli\index.js doctor --json
 node .\dist\cli\index.js doctor --agent copilot --smoke --json
 node .\dist\cli\index.js doctor --agent qwen --smoke --fail-on-unhealthy
+node .\dist\cli\index.js route --task review --agent codex --cwd . --detect --json
+node .\dist\cli\index.js prompt --task summarize --input-file .\demo\issue.txt --cwd . --json
 ```
 
 5. 再跑 demo：
@@ -281,6 +287,36 @@ node .\dist\cli\index.js doctor --agent qwen --smoke --fail-on-unhealthy
 - 加 `--fail-on-unhealthy` 后，可以直接把 `doctor` 当成 CI / 脚本的健康检查入口
 - 当 `doctor` 发现问题时，会在终端、JSON 和 `artifacts/doctor/*.json` 里同时给出下一步修复建议
 
+### `route`
+
+预览某个任务会如何排 agent 顺序，而不真正执行任何 CLI。
+
+```powershell
+node .\dist\cli\index.js route --task review --cwd .
+node .\dist\cli\index.js route --task fix --agent codex --fallback qwen copilot --cwd . --detect --json
+```
+
+适合用来排查：
+
+- 为什么当前任务优先走某个 agent
+- fallback 顺序是不是符合预期
+- 当前路由链路上的 agent 是否已经可探测
+
+### `prompt`
+
+预览最终下发给 agent 的 prompt，而不真正启动 agent。
+
+```powershell
+node .\dist\cli\index.js prompt --task summarize --input-file .\demo\issue.txt --cwd .
+node .\dist\cli\index.js prompt --task review --input-file .\demo\review.diff.txt --cwd . --json
+```
+
+这个命令适合：
+
+- 调试 PromptBuilder 模板
+- 先确认结构化输出约束是否符合预期
+- 在真正执行前检查 prompt 是否过长、是否包含了正确上下文
+
 ### `run`
 
 执行标准任务。
@@ -345,6 +381,8 @@ PromptBuilder 会要求 agent 输出：
 
 - `session-*.log`
 - `doctor/*.json`
+- `previews/*.json`
+- `previews/*.txt`
 - `<task-id>-<timestamp>/task-prompt.txt`
 - `<task-id>-<timestamp>/<agent>-result.json`
 - `<task-id>-<timestamp>/orchestration-result.json`
