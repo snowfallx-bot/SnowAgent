@@ -48,6 +48,7 @@ import {
 } from "../core/retention";
 import { Router } from "../core/router";
 import { StatusReport, StatusService } from "../core/status";
+import { SweepReport, SweepService } from "../core/sweep";
 import { loadTaskFile, writeTaskFile } from "../core/task-file";
 import { AGENT_NAMES, AgentName, TASK_TYPES, Task } from "../core/task";
 import { ValidationService } from "../core/validation";
@@ -69,6 +70,7 @@ interface Context {
   artifacts: ArtifactMaintenanceService;
   retention: RetentionService;
   status: StatusService;
+  sweep: SweepService;
   configReport: ConfigReportService;
   validation: ValidationService;
   logger: Logger;
@@ -171,6 +173,7 @@ function createContext(
     retention,
     history
   );
+  const sweep = new SweepService(config, status, retention);
 
   return {
     config,
@@ -186,6 +189,7 @@ function createContext(
     artifacts,
     retention,
     status,
+    sweep,
     configReport,
     validation,
     logger
@@ -575,6 +579,38 @@ function printStatusReport(report: StatusReport): void {
     console.log(`failedBatch: ${entry.createdAt}`);
     console.log(`  path: ${entry.path}`);
     console.log(`  summary: ${entry.summary}`);
+  }
+}
+
+function printSweepReport(report: SweepReport): void {
+  console.log(`status: ${report.summary.status}`);
+  console.log(`cwd: ${report.cwd}`);
+  if (report.artifactPath) {
+    console.log(`artifactPath: ${report.artifactPath}`);
+  }
+  console.log(
+    `baseline: status=${report.summary.baselineStatus} retentionMatches=${report.summary.retentionMatchedUnits} failedRuns=${report.baseline.summary.failedRuns} failedBatches=${report.baseline.summary.failedBatches}`
+  );
+  console.log(
+    `final: status=${report.summary.finalStatus} failedRuns=${report.summary.failedRuns} failedBatches=${report.summary.failedBatches}`
+  );
+  console.log(
+    `retention: requested=${report.summary.retentionRequested} executed=${report.summary.retentionExecuted} reclaimedUnits=${report.summary.reclaimedUnits} reclaimedBytes=${report.summary.reclaimedBytes} (${formatByteSize(report.summary.reclaimedBytes)})`
+  );
+  if (report.retentionAction.reason) {
+    console.log(`retentionReason: ${report.retentionAction.reason}`);
+  }
+  for (const action of report.summary.recommendedActions) {
+    console.log(`nextAction: [${action.category}] ${action.message}`);
+    if (action.command) {
+      console.log(`  command: ${action.command}`);
+    }
+    if (action.configPath) {
+      console.log(`  configPath: ${action.configPath}`);
+    }
+    if (action.artifactPath) {
+      console.log(`  artifactPath: ${action.artifactPath}`);
+    }
   }
 }
 
@@ -992,6 +1028,77 @@ program
     }
 
     printStatusReport(report);
+  });
+
+program
+  .command("sweep")
+  .description(
+    "Run an operational sweep: capture a baseline status snapshot, optionally apply retention, then capture the final status."
+  )
+  .option("-c, --config <path>", "Path to a JSON/YAML config file.")
+  .option("--cwd <path>", "Base working directory.", process.cwd())
+  .option("--agent <name>", `Limit doctor checks to one agent: ${AGENT_NAMES.join(", ")}`)
+  .option("--smoke", "Include live doctor smoke checks for the selected agents.")
+  .option("--timeout-ms <ms>", "Smoke test timeout override.")
+  .option("--failure-limit <count>", "How many recent failed run/batch artifacts to include.", "3")
+  .option(
+    "--apply-retention",
+    "If the baseline status finds retention matches, apply the configured retention policies before collecting the final status."
+  )
+  .option(
+    "--fail-on-warning",
+    "Exit with code 1 when the final sweep status is warning or unhealthy."
+  )
+  .option(
+    "--fail-on-unhealthy",
+    "Exit with code 1 when the final sweep status is unhealthy."
+  )
+  .option("--json", "Print JSON output.")
+  .action(async (options: {
+    config?: string;
+    cwd: string;
+    agent?: string;
+    smoke?: boolean;
+    timeoutMs?: string;
+    failureLimit?: string;
+    applyRetention?: boolean;
+    failOnWarning?: boolean;
+    failOnUnhealthy?: boolean;
+    json?: boolean;
+  }) => {
+    const cwd = path.resolve(options.cwd);
+    const context = createContext(options.config, cwd, Boolean(options.json));
+    const agentNames = options.agent ? [parseAgentName(options.agent)] : undefined;
+    const report = await context.sweep.execute({
+      cwd,
+      configPath: options.config,
+      smoke: Boolean(options.smoke),
+      agentNames,
+      timeoutMs: options.timeoutMs ? Number(options.timeoutMs) : undefined,
+      failureLimit: options.failureLimit
+        ? parsePositiveInteger(options.failureLimit, "failure-limit")
+        : undefined,
+      applyRetention: Boolean(options.applyRetention)
+    });
+    const shouldFail =
+      report.summary.status === "unhealthy"
+        ? Boolean(options.failOnUnhealthy || options.failOnWarning)
+        : report.summary.status === "warning"
+          ? Boolean(options.failOnWarning)
+          : false;
+
+    if (options.json) {
+      printJson(report);
+      if (shouldFail) {
+        process.exitCode = 1;
+      }
+      return;
+    }
+
+    printSweepReport(report);
+    if (shouldFail) {
+      process.exitCode = 1;
+    }
   });
 
 program
