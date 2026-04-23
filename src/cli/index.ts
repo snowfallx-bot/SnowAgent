@@ -380,6 +380,7 @@ function printArtifactInspectionReport(report: ArtifactInspectionReport): void {
 }
 
 function printArtifactInventoryReport(report: ArtifactInventoryReport): void {
+  const formatSize = (value: number) => `${value} (${formatByteSize(value)})`;
   console.log(`rootDir: ${report.rootDir}`);
   console.log(`filter: ${report.filter}`);
   if (report.filters.status) {
@@ -392,13 +393,13 @@ function printArtifactInventoryReport(report: ArtifactInventoryReport): void {
     console.log(`agentFilter: ${report.filters.selectedAgent}`);
   }
   console.log(
-    `rootTotals: files=${report.totalRootFileCount} bytes=${report.totalRootSizeBytes}`
+    `rootTotals: files=${report.totalRootFileCount} bytes=${formatSize(report.totalRootSizeBytes)}`
   );
   console.log(
-    `matchedTotals: units=${report.matchedUnitCount} files=${report.matchedFileCount} bytes=${report.matchedSizeBytes}`
+    `matchedTotals: units=${report.matchedUnitCount} files=${report.matchedFileCount} bytes=${formatSize(report.matchedSizeBytes)}`
   );
   for (const kind of report.kinds) {
-    console.log(`${kind.kind}: units=${kind.unitCount} files=${kind.fileCount} bytes=${kind.totalSizeBytes}`);
+    console.log(`${kind.kind}: units=${kind.unitCount} files=${kind.fileCount} bytes=${formatSize(kind.totalSizeBytes)}`);
     if (kind.newestCreatedAt) {
       console.log(`  newest: ${kind.newestCreatedAt}`);
     }
@@ -409,6 +410,7 @@ function printArtifactInventoryReport(report: ArtifactInventoryReport): void {
 }
 
 function printArtifactPruneReport(report: ArtifactPruneReport): void {
+  const formatSize = (value: number) => `${value} (${formatByteSize(value)})`;
   console.log(`rootDir: ${report.rootDir}`);
   console.log(`filter: ${report.filter}`);
   console.log(`dryRun: ${report.dryRun}`);
@@ -428,13 +430,13 @@ function printArtifactPruneReport(report: ArtifactPruneReport): void {
     console.log(`keepLatest: ${report.rules.keepLatest}`);
   }
   console.log(
-    `matchedTotals: units=${report.matchedUnitCount} files=${report.matchedFileCount} reclaimableBytes=${report.reclaimableBytes}`
+    `matchedTotals: units=${report.matchedUnitCount} files=${report.matchedFileCount} reclaimableBytes=${formatSize(report.reclaimableBytes)}`
   );
   for (const candidate of report.candidates) {
     console.log(`${candidate.kind}: ${candidate.createdAt}`);
     console.log(`  primaryPath: ${candidate.primaryPath}`);
     console.log(`  files: ${candidate.fileCount}`);
-    console.log(`  bytes: ${candidate.sizeBytes}`);
+    console.log(`  bytes: ${formatSize(candidate.sizeBytes)}`);
     if (candidate.status) {
       console.log(`  status: ${candidate.status}`);
     }
@@ -478,6 +480,22 @@ function parsePositiveInteger(input: string, label: string): number {
   }
 
   return parsed;
+}
+
+function formatByteSize(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes / 1024;
+  let index = 0;
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024;
+    index += 1;
+  }
+
+  return `${value.toFixed(1)} ${units[index]}`;
 }
 
 function parseArtifactFilterKind(input: string): (typeof ARTIFACT_FILTER_KINDS)[number] {
