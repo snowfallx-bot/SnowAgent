@@ -401,13 +401,14 @@ node .\dist\cli\index.js prompt --task-file .\demo\summarize.task.yaml --json
 
 ### `history`
 
-查看 `artifacts/` 目录里的最近产物，包括 doctor 报告、route/prompt 预览、preflight、validation 和实际运行结果。
+查看 `artifacts/` 目录里的最近产物，包括 doctor 报告、route/prompt 预览、preflight、validation、maintenance 报告和实际运行结果。
 
 ```powershell
 node .\dist\cli\index.js history
 node .\dist\cli\index.js history --kind preview --limit 5 --json
 node .\dist\cli\index.js history --kind preflight --limit 5 --json
 node .\dist\cli\index.js history --kind validation --limit 5 --json
+node .\dist\cli\index.js history --kind maintenance --limit 5 --json
 node .\dist\cli\index.js history --kind batch --limit 5 --json
 node .\dist\cli\index.js history --kind run --limit 10
 node .\dist\cli\index.js history --kind run --status failed --agent codex --json
@@ -416,9 +417,10 @@ node .\dist\cli\index.js history --kind run --task-id demo --limit 3
 
 这个命令适合：
 
-- 快速回看最近一次 smoke / preview / preflight / validation / batch / run 发生了什么
+- 快速回看最近一次 smoke / preview / preflight / validation / maintenance / batch / run 发生了什么
+- 回看最近一次 artifact 盘点或清理做了什么
 - 不手动翻目录，直接定位对应 artifact 路径
-- 在脚本里提取最近的 doctor / preview / preflight / validation / batch / run 记录
+- 在脚本里提取最近的 doctor / preview / preflight / validation / maintenance / batch / run 记录
 - 用 `--status` / `--task-id` / `--agent` 把列表快速缩到你关心的那一类记录
 
 ### `inspect`
@@ -429,12 +431,14 @@ node .\dist\cli\index.js history --kind run --task-id demo --limit 3
 node .\dist\cli\index.js inspect --artifact .\artifacts\some-task\orchestration-result.json
 node .\dist\cli\index.js inspect --latest --kind run --json
 node .\dist\cli\index.js inspect --latest --kind batch --index 2
+node .\dist\cli\index.js inspect --latest --kind maintenance --json
 node .\dist\cli\index.js inspect --latest --kind run --status failed --agent codex
 ```
 
 这个命令适合：
 
 - 直接从最新 run / batch / preflight / doctor 结果里看详细上下文
+- 直接展开最新一次 artifact 盘点或清理报告
 - 不自己打开 JSON 文件，也能快速知道 artifact 里有没有 task snapshot
 - 配合 `history` 先看列表，再用 `inspect` 展开第 N 条
 - 先用过滤条件锁定某个失败 run，再直接展开那一条 artifact
@@ -471,6 +475,13 @@ node .\dist\cli\index.js artifacts --kind all --status success --agent qwen --js
 - 判断主要空间是被 `run`、`preflight` 还是 session log 吃掉
 - 在真正清理前，先按 `--status` / `--task-id` / `--agent` 缩小观察范围
 
+每次 `artifacts` 盘点结果也会落到 `artifacts/maintenance/*.json`，因此可以直接配合：
+
+```powershell
+node .\dist\cli\index.js history --kind maintenance --limit 5 --json
+node .\dist\cli\index.js inspect --latest --kind maintenance --json
+```
+
 ### `prune-artifacts`
 
 按保留条数或年龄阈值清理 artifact。默认是 dry-run，只有显式加 `--apply` 才会真的删除。
@@ -492,6 +503,7 @@ node .\dist\cli\index.js prune-artifacts --kind run --status success --keep-late
 - `prune-artifacts` 会按“逻辑单元”删除：`run` 会删整个 artifact 目录，`prompt preview` 会连同 `.json/.txt` 一起删
 - `batch` 清理时会连同对应的 `retry-*.yaml` 一起处理
 - `export` 和 `other` 只会出现在 `artifacts` 总览里，不会被 `prune-artifacts` 直接误删
+- 每次 `prune-artifacts` 也会把计划或执行结果保存到 `artifacts/maintenance/*.json`，方便后续审计和回看
 
 ### `preflight`
 
