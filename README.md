@@ -28,7 +28,7 @@
 - 规则路由与 fallback
 - 结构化输出解析：支持 JSON / JSON 数组 / JSONL / `===RESULT_JSON===` / Markdown JSON code block，并会继续尝试从事件 envelope 中提取最终结构化内容
 - YAML / JSON 配置与 `zod` 校验
-- 本地 CLI 入口：`list` / `config` / `detect` / `doctor` / `route` / `prompt` / `history` / `batch` / `run`
+- 本地 CLI 入口：`list` / `config` / `detect` / `doctor` / `route` / `prompt` / `history` / `validate` / `batch` / `run`
 - 基础单元测试，包含 `child_process.spawn` mock
 
 ## 目录结构
@@ -83,6 +83,7 @@ node .\dist\cli\index.js doctor
 node .\dist\cli\index.js route --task fix --cwd . --detect
 node .\dist\cli\index.js prompt --task summarize --input-file .\demo\issue.txt --cwd .
 node .\dist\cli\index.js history --limit 10
+node .\dist\cli\index.js validate --task-file .\demo\summarize.task.yaml
 node .\dist\cli\index.js batch --plan-file .\demo\demo.batch.yaml --dry-run
 node .\dist\cli\index.js run --task summarize --input-file .\demo\issue.txt --cwd .
 ```
@@ -97,6 +98,7 @@ node ./dist/cli/index.js doctor --json
 node ./dist/cli/index.js route --task review --cwd . --json
 node ./dist/cli/index.js prompt --task summarize --input-file ./demo/issue.txt --cwd . --json
 node ./dist/cli/index.js history --kind preview --json
+node ./dist/cli/index.js validate --plan-file ./demo/demo.batch.yaml --json
 node ./dist/cli/index.js batch --plan-file ./demo/demo.batch.yaml --dry-run --json
 node ./dist/cli/index.js run --task review --input-file ./demo/review.diff.txt --cwd .
 ```
@@ -140,6 +142,7 @@ node .\dist\cli\index.js config --agent copilot --json
 node .\dist\cli\index.js route --task review --agent codex --cwd . --detect --json
 node .\dist\cli\index.js prompt --task summarize --input-file .\demo\issue.txt --cwd . --json
 node .\dist\cli\index.js history --kind preview --limit 5 --json
+node .\dist\cli\index.js validate --task-file .\demo\summarize.task.yaml --plan-file .\demo\demo.batch.yaml --json
 node .\dist\cli\index.js batch --plan-file .\demo\demo.batch.yaml --dry-run --json
 node .\dist\cli\index.js run --task-file .\demo\summarize.task.yaml --dry-run --json
 ```
@@ -382,6 +385,7 @@ node .\dist\cli\index.js prompt --task-file .\demo\summarize.task.yaml --json
 ```powershell
 node .\dist\cli\index.js history
 node .\dist\cli\index.js history --kind preview --limit 5 --json
+node .\dist\cli\index.js history --kind batch --limit 5 --json
 node .\dist\cli\index.js history --kind run --limit 10
 ```
 
@@ -390,6 +394,22 @@ node .\dist\cli\index.js history --kind run --limit 10
 - 快速回看最近一次 smoke / preview / run 发生了什么
 - 不手动翻目录，直接定位对应 artifact 路径
 - 在脚本里提取最近的 doctor / preview / run 记录
+
+### `validate`
+
+校验配置文件、task-file、batch plan 的格式和路径，而不真正运行 agent。
+
+```powershell
+node .\dist\cli\index.js validate
+node .\dist\cli\index.js validate --task-file .\demo\summarize.task.yaml --json
+node .\dist\cli\index.js validate --plan-file .\demo\demo.batch.yaml --fail-on-error
+```
+
+这个命令适合：
+
+- 在无人值守批量执行前，先把 config/task/batch 文件检查一遍
+- 发现 `promptFile`、task-file 路径、batch plan 引用是否缺失
+- 在脚本里用退出码快速拦住坏输入
 
 ### `batch`
 
@@ -417,6 +437,8 @@ tasks:
 - 你离开电脑时，顺序跑一组固定 task-file
 - 先用 `--dry-run` 验证一整批任务的路由和命令构建
 - 输出一份批量汇总报告，方便后续脚本读取
+
+批量汇总报告默认会写到执行 `cwd` 对应的 `artifacts/batches/` 下，这样可以直接配合 `history --kind batch` 回看。
 
 ### `run`
 

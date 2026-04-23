@@ -19,6 +19,7 @@ import { PromptBuilder } from "../core/prompt-builder";
 import { Router } from "../core/router";
 import { loadTaskFile } from "../core/task-file";
 import { AGENT_NAMES, AgentName, TASK_TYPES, Task } from "../core/task";
+import { ValidationService } from "../core/validation";
 import { ProcessRunner } from "../process/process-runner";
 import { readTextFile } from "../utils/fs";
 import { Logger } from "../utils/logger";
@@ -33,6 +34,7 @@ interface Context {
   preview: PreviewService;
   history: ArtifactHistoryService;
   configReport: ConfigReportService;
+  validation: ValidationService;
   logger: Logger;
 }
 
@@ -114,6 +116,7 @@ function createContext(
   );
   const history = new ArtifactHistoryService(config);
   const configReport = new ConfigReportService(config, resolvedConfigPath);
+  const validation = new ValidationService();
   const doctor = new Doctor(config, registry);
 
   return {
@@ -126,6 +129,7 @@ function createContext(
     preview,
     history,
     configReport,
+    validation,
     logger
   };
 }
@@ -641,6 +645,66 @@ program
   });
 
 program
+  .command("validate")
+  .description("Validate config files, task files, and batch plans without running any agent.")
+  .option("--cwd <path>", "Base working directory.", process.cwd())
+  .option("-c, --config-file <path>", "Validate a specific JSON/YAML config file.")
+  .option("--task-file <path>", "Validate a specific JSON/YAML task file.")
+  .option("--plan-file <path>", "Validate a specific JSON/YAML batch plan file.")
+  .option("--json", "Print JSON output.")
+  .option("--fail-on-error", "Exit with code 1 when any validation target is invalid.")
+  .action((options: {
+    cwd: string;
+    configFile?: string;
+    taskFile?: string;
+    planFile?: string;
+    json?: boolean;
+    failOnError?: boolean;
+  }) => {
+    const cwd = path.resolve(options.cwd);
+    const context = createContext(undefined, cwd, Boolean(options.json));
+    const results = [];
+
+    if (options.configFile || (!options.taskFile && !options.planFile)) {
+      results.push(context.validation.validateConfig(options.configFile, cwd));
+    }
+
+    if (options.taskFile) {
+      results.push(context.validation.validateTaskFile(options.taskFile, cwd));
+    }
+
+    if (options.planFile) {
+      results.push(context.validation.validateBatchPlan(options.planFile, cwd));
+    }
+
+    const report = context.validation.buildReport(results);
+
+    if (options.json) {
+      printJson(report);
+      if (options.failOnError && !report.allValid) {
+        process.exitCode = 1;
+      }
+      return;
+    }
+
+    console.log(`allValid: ${report.allValid}`);
+    for (const result of report.results) {
+      console.log(`${result.kind}: ${result.valid ? "valid" : "invalid"}`);
+      if (result.path) {
+        console.log(`  path: ${result.path}`);
+      }
+      console.log(`  summary: ${result.summary}`);
+      if (result.details) {
+        console.log(`  details: ${result.details}`);
+      }
+    }
+
+    if (options.failOnError && !report.allValid) {
+      process.exitCode = 1;
+    }
+  });
+
+program
   .command("batch")
   .description("Run a batch plan that references multiple task files.")
   .requiredOption("--plan-file <path>", "Path to a JSON/YAML batch plan file.")
@@ -661,7 +725,8 @@ program
     const context = createContext(options.config, cwd, Boolean(options.json));
     const plan = loadBatchPlan(options.planFile, cwd);
     const report = await context.batch.runPlan(plan, {
-      dryRun: Boolean(options.dryRun)
+      dryRun: Boolean(options.dryRun),
+      artifactCwd: cwd
     });
 
     if (options.json) {
