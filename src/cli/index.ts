@@ -9,13 +9,17 @@ import { Command } from "commander";
 import { AgentRegistry } from "../agents/registry";
 import { loadConfig } from "../config/load-config";
 import { AppConfig } from "../config/schema";
-import { BatchRunnerService, loadBatchPlan } from "../core/batch";
+import { BatchRunReport, BatchRunnerService, loadBatchPlan } from "../core/batch";
 import { Orchestrator } from "../core/orchestrator";
 import { ConfigReportService } from "../core/config-report";
 import { Doctor } from "../core/doctor";
 import { ArtifactHistoryService, HISTORY_KINDS } from "../core/history";
 import { PreviewService } from "../core/preview";
 import { PromptBuilder } from "../core/prompt-builder";
+import {
+  resolveLatestFailedRetryPlan,
+  resolveRetryPlanFromBatchReport
+} from "../core/retry";
 import { Router } from "../core/router";
 import { loadTaskFile } from "../core/task-file";
 import { AGENT_NAMES, AgentName, TASK_TYPES, Task } from "../core/task";
@@ -136,6 +140,41 @@ function createContext(
 
 function printJson(value: unknown): void {
   console.log(JSON.stringify(value, null, 2));
+}
+
+function printBatchRunReport(report: BatchRunReport): void {
+  console.log(`planFile: ${report.planFilePath}`);
+  console.log(`dryRun: ${report.dryRun}`);
+  console.log(`continueOnError: ${report.continueOnError}`);
+  console.log(
+    `summary: succeeded=${report.succeededTasks} failed=${report.failedTasks} total=${report.totalTasks} stoppedEarly=${report.stoppedEarly}`
+  );
+  if (report.artifactPath) {
+    console.log(`artifactPath: ${report.artifactPath}`);
+  }
+  if (report.retryPlanPath) {
+    console.log(`retryPlanPath: ${report.retryPlanPath}`);
+  }
+
+  for (const result of report.results) {
+    console.log(`${result.label ?? path.basename(result.taskFilePath)}: ${result.success ? "success" : "failed"}`);
+    console.log(`  taskFile: ${result.taskFilePath}`);
+    if (result.taskType) {
+      console.log(`  taskType: ${result.taskType}`);
+    }
+    if (result.taskId) {
+      console.log(`  taskId: ${result.taskId}`);
+    }
+    if (result.selectedAgent) {
+      console.log(`  selectedAgent: ${result.selectedAgent}`);
+    }
+    if (result.artifactDir) {
+      console.log(`  artifactDir: ${result.artifactDir}`);
+    }
+    if (result.error) {
+      console.log(`  error: ${result.error}`);
+    }
+  }
 }
 
 function parseAgentName(input: string): AgentName {
@@ -742,38 +781,79 @@ program
       return;
     }
 
-    console.log(`planFile: ${report.planFilePath}`);
-    console.log(`dryRun: ${report.dryRun}`);
-    console.log(`continueOnError: ${report.continueOnError}`);
-    console.log(
-      `summary: succeeded=${report.succeededTasks} failed=${report.failedTasks} total=${report.totalTasks} stoppedEarly=${report.stoppedEarly}`
-    );
-    if (report.artifactPath) {
-      console.log(`artifactPath: ${report.artifactPath}`);
+    printBatchRunReport(report);
+
+    if (options.failOnError && report.failedTasks > 0) {
+      process.exitCode = 1;
     }
-    if (report.retryPlanPath) {
-      console.log(`retryPlanPath: ${report.retryPlanPath}`);
+  });
+
+program
+  .command("retry")
+  .description("Re-run a retry batch plan directly, from a batch report, or from the latest failed batch.")
+  .option("--retry-plan <path>", "Path to a retry batch plan YAML file.")
+  .option("--report-file <path>", "Path to a batch JSON report with retryPlanPath.")
+  .option("--latest-failed", "Use the most recent failed batch report from artifacts/.")
+  .option("--cwd <path>", "Base working directory.", process.cwd())
+  .option("--dry-run", "Build commands and orchestration flow without launching agent processes.")
+  .option("--fail-on-error", "Exit with code 1 if any task in the retry batch fails.")
+  .option("-c, --config <path>", "Path to a JSON/YAML config file.")
+  .option("--json", "Print JSON output.")
+  .action(async (options: {
+    retryPlan?: string;
+    reportFile?: string;
+    latestFailed?: boolean;
+    cwd: string;
+    dryRun?: boolean;
+    failOnError?: boolean;
+    config?: string;
+    json?: boolean;
+  }) => {
+    const cwd = path.resolve(options.cwd);
+    const context = createContext(options.config, cwd, Boolean(options.json));
+    const activeSources = [options.retryPlan, options.reportFile, options.latestFailed ? "latest" : undefined]
+      .filter((value) => value !== undefined);
+
+    if (activeSources.length !== 1) {
+      throw new Error(
+        "Provide exactly one of --retry-plan, --report-file, or --latest-failed."
+      );
     }
 
-    for (const result of report.results) {
-      console.log(`${result.label ?? path.basename(result.taskFilePath)}: ${result.success ? "success" : "failed"}`);
-      console.log(`  taskFile: ${result.taskFilePath}`);
-      if (result.taskType) {
-        console.log(`  taskType: ${result.taskType}`);
+    const resolution = options.retryPlan
+      ? {
+          retryPlanPath: path.resolve(cwd, options.retryPlan),
+          source: "retry_plan" as const
+        }
+      : options.reportFile
+        ? resolveRetryPlanFromBatchReport(options.reportFile, cwd)
+        : resolveLatestFailedRetryPlan(context.config, cwd);
+    const plan = loadBatchPlan(resolution.retryPlanPath, cwd);
+    const report = await context.batch.runPlan(plan, {
+      dryRun: Boolean(options.dryRun),
+      artifactCwd: cwd
+    });
+    const output = {
+      source: resolution.source,
+      sourceReportPath: "sourceReportPath" in resolution ? resolution.sourceReportPath : undefined,
+      retryPlanPath: resolution.retryPlanPath,
+      report
+    };
+
+    if (options.json) {
+      printJson(output);
+      if (options.failOnError && report.failedTasks > 0) {
+        process.exitCode = 1;
       }
-      if (result.taskId) {
-        console.log(`  taskId: ${result.taskId}`);
-      }
-      if (result.selectedAgent) {
-        console.log(`  selectedAgent: ${result.selectedAgent}`);
-      }
-      if (result.artifactDir) {
-        console.log(`  artifactDir: ${result.artifactDir}`);
-      }
-      if (result.error) {
-        console.log(`  error: ${result.error}`);
-      }
+      return;
     }
+
+    console.log(`source: ${output.source}`);
+    if (output.sourceReportPath) {
+      console.log(`sourceReportPath: ${output.sourceReportPath}`);
+    }
+    console.log(`retryPlanPath: ${output.retryPlanPath}`);
+    printBatchRunReport(report);
 
     if (options.failOnError && report.failedTasks > 0) {
       process.exitCode = 1;
