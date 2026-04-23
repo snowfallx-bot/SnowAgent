@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_CONFIG } from "../src/config/schema";
+import { DEFAULT_CONFIG, RETENTION_POLICY_KINDS } from "../src/config/schema";
 
 describe("DEFAULT_CONFIG agent presets", () => {
   it("uses codex exec as the calibrated non-interactive default", () => {
@@ -41,5 +41,35 @@ describe("DEFAULT_CONFIG agent presets", () => {
     expect(qwen.notes.some((note) => note.includes("auth type"))).toBe(true);
     expect(qwen.capabilities.supportsStdin).toBe(false);
     expect(qwen.capabilities.supportsPromptFile).toBe(false);
+  });
+
+  it("ships retention defaults that keep transient artifacts tidy without deleting runs by default", () => {
+    const retention = DEFAULT_CONFIG.retention;
+
+    expect(RETENTION_POLICY_KINDS).toEqual([
+      "doctor",
+      "preview",
+      "preflight",
+      "run",
+      "batch",
+      "validation",
+      "maintenance",
+      "log"
+    ]);
+    expect(retention.preview).toEqual({
+      enabled: true,
+      olderThanDays: 14,
+      keepLatest: 20
+    });
+    expect(retention.run).toEqual({
+      enabled: false,
+      olderThanDays: 30,
+      keepLatest: 30
+    });
+    expect(retention.log).toEqual({
+      enabled: true,
+      olderThanDays: 7,
+      keepLatest: 100
+    });
   });
 });

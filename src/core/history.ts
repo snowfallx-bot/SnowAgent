@@ -249,7 +249,10 @@ function parseMaintenanceEntry(
   data: Record<string, unknown>
 ): ArtifactHistoryEntry {
   const mode = getString(data.mode) ?? "unknown";
-  const filter = getString(data.filter) ?? "all";
+  const filter =
+    getString(data.filter) ??
+    getString(data.selectedKind) ??
+    "all";
   const dryRun = getBoolean(data.dryRun);
   const matchedUnitCount =
     typeof data.matchedUnitCount === "number" ? data.matchedUnitCount : undefined;
@@ -257,8 +260,10 @@ function parseMaintenanceEntry(
     typeof data.reclaimableBytes === "number" ? data.reclaimableBytes : undefined;
   const matchedSizeBytes =
     typeof data.matchedSizeBytes === "number" ? data.matchedSizeBytes : undefined;
+  const executedPolicies =
+    typeof data.executedPolicies === "number" ? data.executedPolicies : undefined;
   const status =
-    mode === "prune"
+    mode === "prune" || mode === "retention"
       ? dryRun === true
         ? "dry_run"
         : dryRun === false
@@ -273,6 +278,8 @@ function parseMaintenanceEntry(
     summary:
       mode === "prune"
         ? `maintenance prune filter=${filter} units=${matchedUnitCount ?? 0} reclaimableBytes=${reclaimableBytes ?? 0}`
+        : mode === "retention"
+          ? `maintenance retention filter=${filter} policies=${executedPolicies ?? 0} reclaimableBytes=${reclaimableBytes ?? 0}`
         : `maintenance inventory filter=${filter} units=${matchedUnitCount ?? 0} sizeBytes=${matchedSizeBytes ?? 0}`,
     status
   };

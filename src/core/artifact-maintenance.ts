@@ -129,6 +129,7 @@ export interface ArtifactPruneOptions {
   olderThanDays?: number;
   keepLatest?: number;
   apply?: boolean;
+  persistReport?: boolean;
 }
 
 function normalizePath(value: string): string {
@@ -592,7 +593,10 @@ export class ArtifactMaintenanceService {
       }))
     };
 
-    const artifactPath = this.resolveReportPath(options.cwd, "prune", filter);
+    const artifactPath =
+      options.persistReport === false
+        ? undefined
+        : this.resolveReportPath(options.cwd, "prune", filter);
     if (artifactPath) {
       report.artifactPath = artifactPath;
       writeJsonFile(artifactPath, report);

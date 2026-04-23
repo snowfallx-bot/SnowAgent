@@ -218,6 +218,34 @@ describe("ArtifactHistoryService", () => {
     expect(report.entries[0]?.status).toBe("applied");
   });
 
+  it("parses retention maintenance entries with dry-run status", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "snowagent-history-retention-"));
+    const config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+    const maintenanceDir = path.join(tempDir, config.artifacts.rootDir, "maintenance");
+
+    ensureDir(maintenanceDir);
+    writeJsonFile(path.join(maintenanceDir, "retention-1.json"), {
+      generatedAt: "2026-04-23T00:00:01.000Z",
+      mode: "retention",
+      filter: "log",
+      dryRun: true,
+      executedPolicies: 1,
+      reclaimableBytes: 2048
+    });
+
+    const history = new ArtifactHistoryService(config);
+    const report = history.list({
+      cwd: tempDir,
+      limit: 5,
+      kind: "maintenance"
+    });
+
+    expect(report.totalEntries).toBe(1);
+    expect(report.entries[0]?.kind).toBe("maintenance");
+    expect(report.entries[0]?.status).toBe("dry_run");
+    expect(report.entries[0]?.summary).toContain("retention");
+  });
+
   it("filters preflight entries", () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "snowagent-history-preflight-"));
     const config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));

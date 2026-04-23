@@ -1,4 +1,4 @@
-import { AppConfig } from "../config/schema";
+import { AppConfig, RETENTION_POLICY_KINDS, RetentionPolicyKind } from "../config/schema";
 import { AGENT_NAMES, AgentName, TASK_TYPES, TaskType } from "./task";
 
 export interface ConfigReportAgent {
@@ -32,6 +32,7 @@ export interface ConfigReport {
   logging: AppConfig["logging"];
   runtime: AppConfig["runtime"];
   artifacts: AppConfig["artifacts"];
+  retention: Record<RetentionPolicyKind, AppConfig["retention"][RetentionPolicyKind]>;
   routing: Record<TaskType, AgentName[]>;
   agents: ConfigReportAgent[];
 }
@@ -58,6 +59,12 @@ export class ConfigReportService {
       logging: this.config.logging,
       runtime: this.config.runtime,
       artifacts: this.config.artifacts,
+      retention: Object.fromEntries(
+        RETENTION_POLICY_KINDS.map((kind) => [
+          kind,
+          { ...this.config.retention[kind] }
+        ])
+      ) as Record<RetentionPolicyKind, AppConfig["retention"][RetentionPolicyKind]>,
       routing: Object.fromEntries(
         TASK_TYPES.map((taskType) => [taskType, [...this.config.routing.routes[taskType]]])
       ) as Record<TaskType, AgentName[]>,

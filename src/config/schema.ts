@@ -7,6 +7,17 @@ const logLevelSchema = z.enum(["debug", "info", "warn", "error"]);
 const inputModeSchema = z.enum(["stdin", "file", "args"]);
 const agentNameSchema = z.enum(AGENT_NAMES);
 const taskTypeSchema = z.enum(TASK_TYPES);
+export const RETENTION_POLICY_KINDS = [
+  "doctor",
+  "preview",
+  "preflight",
+  "run",
+  "batch",
+  "validation",
+  "maintenance",
+  "log"
+] as const;
+const retentionPolicyKindSchema = z.enum(RETENTION_POLICY_KINDS);
 
 export const capabilitySchema = z.object({
   supportsStdin: z.boolean(),
@@ -42,6 +53,31 @@ export const agentConfigSchema = z.object({
   notes: z.array(z.string())
 });
 
+export const retentionPolicySchema = z.object({
+  enabled: z.boolean(),
+  olderThanDays: z.number().int().positive().optional(),
+  keepLatest: z.number().int().positive().optional(),
+  status: z.string().min(1).optional(),
+  selectedAgent: agentNameSchema.optional()
+}).superRefine((value, context) => {
+  if (!value.enabled) {
+    return;
+  }
+
+  if (value.olderThanDays === undefined && value.keepLatest === undefined) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Enabled retention policies must define keepLatest, olderThanDays, or both."
+    });
+  }
+});
+
+export const retentionConfigSchema = z.object(
+  Object.fromEntries(
+    RETENTION_POLICY_KINDS.map((kind) => [kind, retentionPolicySchema])
+  ) as Record<(typeof RETENTION_POLICY_KINDS)[number], typeof retentionPolicySchema>
+);
+
 export const appConfigSchema = z.object({
   logging: z.object({
     level: logLevelSchema,
@@ -57,6 +93,7 @@ export const appConfigSchema = z.object({
     savePromptFiles: z.boolean(),
     saveLogs: z.boolean()
   }),
+  retention: retentionConfigSchema,
   routing: z.object({
     routes: z.record(taskTypeSchema, z.array(agentNameSchema).min(1))
   }),
@@ -71,6 +108,9 @@ export type AgentConfig = z.infer<typeof agentConfigSchema>;
 export type AppConfig = z.infer<typeof appConfigSchema>;
 export type LogLevel = z.infer<typeof logLevelSchema>;
 export type ConfiguredInputMode = z.infer<typeof inputModeSchema>;
+export type RetentionPolicyKind = z.infer<typeof retentionPolicyKindSchema>;
+export type RetentionPolicyConfig = z.infer<typeof retentionPolicySchema>;
+export type RetentionConfig = z.infer<typeof retentionConfigSchema>;
 
 const DEFAULT_CAPABILITIES = {
   supportsStdin: true,
@@ -182,6 +222,51 @@ function buildQwenDefaults(): AgentConfig {
   };
 }
 
+function buildRetentionDefaults(): RetentionConfig {
+  return {
+    doctor: {
+      enabled: true,
+      olderThanDays: 30,
+      keepLatest: 20
+    },
+    preview: {
+      enabled: true,
+      olderThanDays: 14,
+      keepLatest: 20
+    },
+    preflight: {
+      enabled: true,
+      olderThanDays: 14,
+      keepLatest: 30
+    },
+    run: {
+      enabled: false,
+      olderThanDays: 30,
+      keepLatest: 30
+    },
+    batch: {
+      enabled: true,
+      olderThanDays: 30,
+      keepLatest: 30
+    },
+    validation: {
+      enabled: true,
+      olderThanDays: 30,
+      keepLatest: 30
+    },
+    maintenance: {
+      enabled: true,
+      olderThanDays: 30,
+      keepLatest: 50
+    },
+    log: {
+      enabled: true,
+      olderThanDays: 7,
+      keepLatest: 100
+    }
+  };
+}
+
 export const DEFAULT_CONFIG: AppConfig = {
   logging: {
     level: "info",
@@ -197,6 +282,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     savePromptFiles: true,
     saveLogs: true
   },
+  retention: buildRetentionDefaults(),
   routing: {
     routes: {
       summarize: ["copilot", "qwen", "codex"],

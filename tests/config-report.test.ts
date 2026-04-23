@@ -17,6 +17,8 @@ describe("ConfigReportService", () => {
 
     expect(report.usingDefaultConfig).toBe(false);
     expect(report.configPath).toBe("C:\\repo\\agent-orchestrator.config.yaml");
+    expect(report.retention.preview.keepLatest).toBe(20);
+    expect(report.retention.run.enabled).toBe(false);
     expect(report.routing.review).toEqual(["codex", "copilot", "qwen"]);
     expect(report.agents).toHaveLength(1);
     expect(report.agents[0]?.name).toBe("copilot");
