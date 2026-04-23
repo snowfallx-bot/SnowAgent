@@ -28,7 +28,7 @@
 - 规则路由与 fallback
 - 结构化输出解析：支持 JSON / JSON 数组 / JSONL / `===RESULT_JSON===` / Markdown JSON code block，并会继续尝试从事件 envelope 中提取最终结构化内容
 - YAML / JSON 配置与 `zod` 校验
-- 本地 CLI 入口：`list` / `config` / `detect` / `doctor` / `route` / `prompt` / `history` / `inspect` / `export-task` / `preflight` / `validate` / `batch` / `retry` / `rerun` / `run`
+- 本地 CLI 入口：`list` / `config` / `detect` / `doctor` / `route` / `prompt` / `history` / `inspect` / `artifacts` / `prune-artifacts` / `export-task` / `preflight` / `validate` / `batch` / `retry` / `rerun` / `run`
 - 基础单元测试，包含 `child_process.spawn` mock
 
 ## 目录结构
@@ -85,6 +85,8 @@ node .\dist\cli\index.js prompt --task summarize --input-file .\demo\issue.txt -
 node .\dist\cli\index.js preflight --task-file .\demo\summarize.task.yaml
 node .\dist\cli\index.js history --limit 10
 node .\dist\cli\index.js inspect --latest --kind run
+node .\dist\cli\index.js artifacts --json
+node .\dist\cli\index.js prune-artifacts --kind log --keep-latest 10
 node .\dist\cli\index.js export-task --latest-run --output-file .\exports\latest-run.task.yaml
 node .\dist\cli\index.js validate --task-file .\demo\summarize.task.yaml
 node .\dist\cli\index.js batch --plan-file .\demo\demo.batch.yaml --dry-run --preflight
@@ -105,6 +107,8 @@ node ./dist/cli/index.js prompt --task summarize --input-file ./demo/issue.txt -
 node ./dist/cli/index.js preflight --plan-file ./demo/demo.batch.yaml --json
 node ./dist/cli/index.js history --kind preview --json
 node ./dist/cli/index.js inspect --latest --kind batch --json
+node ./dist/cli/index.js artifacts --kind run --json
+node ./dist/cli/index.js prune-artifacts --kind preview --keep-latest 3 --json
 node ./dist/cli/index.js export-task --latest-failed --output-file ./exports/latest-failed.task.json --format json
 node ./dist/cli/index.js validate --plan-file ./demo/demo.batch.yaml --json
 node ./dist/cli/index.js batch --plan-file ./demo/demo.batch.yaml --dry-run --preflight --json
@@ -154,6 +158,8 @@ node .\dist\cli\index.js prompt --task summarize --input-file .\demo\issue.txt -
 node .\dist\cli\index.js preflight --task-file .\demo\review.task.yaml --json
 node .\dist\cli\index.js history --kind preview --limit 5 --json
 node .\dist\cli\index.js inspect --latest --kind run --json
+node .\dist\cli\index.js artifacts --kind all --json
+node .\dist\cli\index.js prune-artifacts --kind run --keep-latest 5 --json
 node .\dist\cli\index.js export-task --latest-run --output-file .\exports\rerun.task.yaml
 node .\dist\cli\index.js validate --task-file .\demo\summarize.task.yaml --plan-file .\demo\demo.batch.yaml --json
 node .\dist\cli\index.js batch --plan-file .\demo\demo.batch.yaml --dry-run --preflight --json
@@ -448,6 +454,44 @@ node .\dist\cli\index.js export-task --latest-failed --output-file .\exports\lat
 - 把一次历史 `run` 重新沉淀成 task-file，纳入 `batch` 计划
 - 在 `rerun` 之外，再保留一份可编辑、可版本化的任务快照
 - 用 `--strip-id` 导出一个“下一次执行自动分配新 taskId”的模板
+
+### `artifacts`
+
+查看 `artifacts/` 当前占了多少空间、各类产物各有多少份，以及每一类最新的一条落在哪里。
+
+```powershell
+node .\dist\cli\index.js artifacts
+node .\dist\cli\index.js artifacts --kind run --json
+node .\dist\cli\index.js artifacts --kind all --status success --agent qwen --json
+```
+
+这个命令适合：
+
+- 长时间无人值守后，先看 `artifacts/` 是不是已经堆大了
+- 判断主要空间是被 `run`、`preflight` 还是 session log 吃掉
+- 在真正清理前，先按 `--status` / `--task-id` / `--agent` 缩小观察范围
+
+### `prune-artifacts`
+
+按保留条数或年龄阈值清理 artifact。默认是 dry-run，只有显式加 `--apply` 才会真的删除。
+
+```powershell
+node .\dist\cli\index.js prune-artifacts --kind log --keep-latest 10
+node .\dist\cli\index.js prune-artifacts --kind preview --older-than-days 7 --json
+node .\dist\cli\index.js prune-artifacts --kind run --status success --keep-latest 5 --apply
+```
+
+这个命令适合：
+
+- 定期压缩 session log 数量，只保留最近几份
+- 清理很久以前的 preview / preflight / validation 结果
+- 对成功 run 做保留最近 N 份的策略，同时把失败 run 留久一点单独排查
+
+说明：
+
+- `prune-artifacts` 会按“逻辑单元”删除：`run` 会删整个 artifact 目录，`prompt preview` 会连同 `.json/.txt` 一起删
+- `batch` 清理时会连同对应的 `retry-*.yaml` 一起处理
+- `export` 和 `other` 只会出现在 `artifacts` 总览里，不会被 `prune-artifacts` 直接误删
 
 ### `preflight`
 
