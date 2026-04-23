@@ -333,6 +333,15 @@ function printArtifactInspectionReport(report: ArtifactInspectionReport): void {
   if (report.historyRootDir) {
     console.log(`historyRootDir: ${report.historyRootDir}`);
   }
+  if (report.historyFilters?.status) {
+    console.log(`historyStatus: ${report.historyFilters.status}`);
+  }
+  if (report.historyFilters?.taskId) {
+    console.log(`historyTaskId: ${report.historyFilters.taskId}`);
+  }
+  if (report.historyFilters?.selectedAgent) {
+    console.log(`historySelectedAgent: ${report.historyFilters.selectedAgent}`);
+  }
   if (report.entry) {
     console.log(`createdAt: ${report.entry.createdAt}`);
     console.log(`summary: ${report.entry.summary}`);
@@ -924,12 +933,18 @@ program
     `Artifact kind filter: ${HISTORY_KINDS.join(", ")}`,
     "all"
   )
+  .option("--status <status>", "Filter entries by status, such as success/failed/blocked.")
+  .option("--task-id <text>", "Filter entries whose taskId contains this text.")
+  .option("--agent <name>", `Filter entries by selected agent: ${AGENT_NAMES.join(", ")}`)
   .option("--limit <count>", "Maximum number of entries to return.", "20")
   .option("-c, --config <path>", "Path to a JSON/YAML config file.")
   .option("--json", "Print JSON output.")
   .action((options: {
     cwd: string;
     kind: string;
+    status?: string;
+    taskId?: string;
+    agent?: string;
     limit: string;
     config?: string;
     json?: boolean;
@@ -946,7 +961,10 @@ program
     const report = context.history.list({
       cwd,
       kind: options.kind as (typeof HISTORY_KINDS)[number],
-      limit: parsePositiveInteger(options.limit, "History limit")
+      limit: parsePositiveInteger(options.limit, "History limit"),
+      status: options.status,
+      taskId: options.taskId,
+      selectedAgent: options.agent ? parseAgentName(options.agent) : undefined
     });
 
     if (options.json) {
@@ -956,6 +974,15 @@ program
 
     console.log(`rootDir: ${report.rootDir}`);
     console.log(`filter: ${report.filter}`);
+    if (report.filters.status) {
+      console.log(`statusFilter: ${report.filters.status}`);
+    }
+    if (report.filters.taskId) {
+      console.log(`taskIdFilter: ${report.filters.taskId}`);
+    }
+    if (report.filters.selectedAgent) {
+      console.log(`agentFilter: ${report.filters.selectedAgent}`);
+    }
     console.log(`returned: ${report.returnedEntries}/${report.totalEntries}`);
 
     for (const entry of report.entries) {
@@ -985,6 +1012,18 @@ program
     "all"
   )
   .option(
+    "--status <status>",
+    "When using --latest, filter entries by status before choosing the indexed result."
+  )
+  .option(
+    "--task-id <text>",
+    "When using --latest, filter entries whose taskId contains this text."
+  )
+  .option(
+    "--agent <name>",
+    `When using --latest, filter entries by selected agent: ${AGENT_NAMES.join(", ")}`
+  )
+  .option(
     "--index <count>",
     "When using --latest, inspect the Nth entry in descending history order.",
     "1"
@@ -996,6 +1035,9 @@ program
     artifact?: string;
     latest?: boolean;
     kind: string;
+    status?: string;
+    taskId?: string;
+    agent?: string;
     index: string;
     cwd: string;
     config?: string;
@@ -1015,7 +1057,10 @@ program
       artifactPath: options.artifact,
       latest: Boolean(options.latest),
       kind: options.kind as (typeof HISTORY_KINDS)[number],
-      index: parsePositiveInteger(options.index, "Inspection index")
+      index: parsePositiveInteger(options.index, "Inspection index"),
+      status: options.status,
+      taskId: options.taskId,
+      selectedAgent: options.agent ? parseAgentName(options.agent) : undefined
     });
 
     if (options.json) {

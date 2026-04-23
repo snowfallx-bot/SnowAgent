@@ -208,4 +208,48 @@ describe("ArtifactHistoryService", () => {
     expect(report.entries[0]?.kind).toBe("preflight");
     expect(report.entries[0]?.status).toBe("blocked");
   });
+
+  it("filters run entries by status, task id, and selected agent", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "snowagent-history-run-filter-"));
+    const config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+    const artifactsRoot = path.join(tempDir, config.artifacts.rootDir);
+    const failedDir = path.join(artifactsRoot, "task-failed");
+    const successDir = path.join(artifactsRoot, "task-success");
+
+    ensureDir(failedDir);
+    ensureDir(successDir);
+    writeJsonFile(path.join(failedDir, "orchestration-result.json"), {
+      completedAt: "2026-04-23T00:00:02.000Z",
+      taskId: "fix-123",
+      success: false,
+      selectedAgent: "codex",
+      route: {
+        taskType: "fix"
+      }
+    });
+    writeJsonFile(path.join(successDir, "orchestration-result.json"), {
+      completedAt: "2026-04-23T00:00:03.000Z",
+      taskId: "fix-999",
+      success: true,
+      selectedAgent: "copilot",
+      route: {
+        taskType: "fix"
+      }
+    });
+
+    const history = new ArtifactHistoryService(config);
+    const report = history.list({
+      cwd: tempDir,
+      kind: "run",
+      status: "failed",
+      taskId: "123",
+      selectedAgent: "codex"
+    });
+
+    expect(report.totalEntries).toBe(1);
+    expect(report.filters.status).toBe("failed");
+    expect(report.filters.taskId).toBe("123");
+    expect(report.filters.selectedAgent).toBe("codex");
+    expect(report.entries[0]?.taskId).toBe("fix-123");
+  });
 });

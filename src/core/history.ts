@@ -31,6 +31,11 @@ export interface ArtifactHistoryReport {
   generatedAt: string;
   rootDir: string;
   filter: ArtifactHistoryFilter;
+  filters: {
+    status?: string;
+    taskId?: string;
+    selectedAgent?: string;
+  };
   totalEntries: number;
   returnedEntries: number;
   entries: ArtifactHistoryEntry[];
@@ -40,6 +45,9 @@ export interface ArtifactHistoryOptions {
   cwd: string;
   limit?: number;
   kind?: ArtifactHistoryFilter;
+  status?: string;
+  taskId?: string;
+  selectedAgent?: string;
 }
 
 function walkFiles(rootDir: string): string[] {
@@ -284,6 +292,25 @@ function matchesFilter(
   return kind === filter;
 }
 
+function matchesEntryFilters(
+  entry: ArtifactHistoryEntry,
+  options: Pick<ArtifactHistoryOptions, "status" | "taskId" | "selectedAgent">
+): boolean {
+  if (options.status && entry.status !== options.status) {
+    return false;
+  }
+
+  if (options.taskId && !entry.taskId?.includes(options.taskId)) {
+    return false;
+  }
+
+  if (options.selectedAgent && entry.selectedAgent !== options.selectedAgent) {
+    return false;
+  }
+
+  return true;
+}
+
 export class ArtifactHistoryService {
   public constructor(private readonly config: AppConfig) {}
 
@@ -304,37 +331,24 @@ export class ArtifactHistoryService {
         continue;
       }
 
-      if (kind === "doctor") {
-        entries.push(parseDoctorEntry(filePath, data));
-        continue;
-      }
+      const entry =
+        kind === "doctor"
+          ? parseDoctorEntry(filePath, data)
+          : kind === "prompt_preview"
+            ? parsePromptPreviewEntry(filePath, data)
+            : kind === "route_preview"
+              ? parseRoutePreviewEntry(filePath, data)
+              : kind === "preflight"
+                ? parsePreflightEntry(filePath, data)
+                : kind === "batch"
+                  ? parseBatchEntry(filePath, data)
+                  : kind === "validation"
+                    ? parseValidationEntry(filePath, data)
+                    : parseRunEntry(filePath, data);
 
-      if (kind === "prompt_preview") {
-        entries.push(parsePromptPreviewEntry(filePath, data));
-        continue;
+      if (matchesEntryFilters(entry, options)) {
+        entries.push(entry);
       }
-
-      if (kind === "route_preview") {
-        entries.push(parseRoutePreviewEntry(filePath, data));
-        continue;
-      }
-
-      if (kind === "preflight") {
-        entries.push(parsePreflightEntry(filePath, data));
-        continue;
-      }
-
-      if (kind === "batch") {
-        entries.push(parseBatchEntry(filePath, data));
-        continue;
-      }
-
-      if (kind === "validation") {
-        entries.push(parseValidationEntry(filePath, data));
-        continue;
-      }
-
-      entries.push(parseRunEntry(filePath, data));
     }
 
     entries.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
@@ -344,6 +358,11 @@ export class ArtifactHistoryService {
       generatedAt: new Date().toISOString(),
       rootDir,
       filter,
+      filters: {
+        status: options.status,
+        taskId: options.taskId,
+        selectedAgent: options.selectedAgent
+      },
       totalEntries: entries.length,
       returnedEntries: limitedEntries.length,
       entries: limitedEntries

@@ -20,6 +20,11 @@ export interface ArtifactInspectionReport {
   historyFilter?: ArtifactHistoryFilter;
   historyIndex?: number;
   historyRootDir?: string;
+  historyFilters?: {
+    status?: string;
+    taskId?: string;
+    selectedAgent?: string;
+  };
   entry?: ArtifactHistoryEntry;
   topLevelKeys: string[];
   raw: unknown;
@@ -32,6 +37,9 @@ export interface InspectArtifactOptions {
   latest?: boolean;
   kind?: ArtifactHistoryFilter;
   index?: number;
+  status?: string;
+  taskId?: string;
+  selectedAgent?: string;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -83,7 +91,10 @@ export class ArtifactInspector {
     const history = new ArtifactHistoryService(this.config).list({
       cwd: options.cwd,
       kind: options.kind ?? "all",
-      limit: Math.max(1, options.index ?? 1)
+      limit: Math.max(1, options.index ?? 1),
+      status: options.status,
+      taskId: options.taskId,
+      selectedAgent: options.selectedAgent
     });
     const historyIndex = Math.max(1, options.index ?? 1);
     const entry = history.entries[historyIndex - 1];
@@ -106,6 +117,7 @@ export class ArtifactInspector {
       historyFilter: history.filter,
       historyIndex,
       historyRootDir: history.rootDir,
+      historyFilters: history.filters,
       entry,
       topLevelKeys: isPlainObject(raw) ? Object.keys(raw) : [],
       raw,

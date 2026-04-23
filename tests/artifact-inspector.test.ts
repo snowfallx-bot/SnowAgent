@@ -76,4 +76,59 @@ describe("ArtifactInspector", () => {
       expect.arrayContaining(["generatedAt", "totalTasks", "failedTasks"])
     );
   });
+
+  it("inspects the latest filtered run artifact", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "snowagent-inspect-filtered-"));
+    const config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+    const artifactsRoot = path.join(tempDir, config.artifacts.rootDir);
+    const failedDir = path.join(artifactsRoot, "task-failed");
+    const successDir = path.join(artifactsRoot, "task-success");
+
+    ensureDir(failedDir);
+    ensureDir(successDir);
+    writeJsonFile(path.join(failedDir, "orchestration-result.json"), {
+      taskId: "task-failed",
+      success: false,
+      selectedAgent: "codex",
+      completedAt: "2026-04-23T00:00:02.000Z",
+      route: {
+        taskType: "fix"
+      },
+      task: {
+        id: "task-failed",
+        type: "fix",
+        prompt: "Fix the flaky retry loop.",
+        cwd: tempDir
+      }
+    });
+    writeJsonFile(path.join(successDir, "orchestration-result.json"), {
+      taskId: "task-success",
+      success: true,
+      selectedAgent: "qwen",
+      completedAt: "2026-04-23T00:00:03.000Z",
+      route: {
+        taskType: "summarize"
+      },
+      task: {
+        id: "task-success",
+        type: "summarize",
+        prompt: "Summarize the issue.",
+        cwd: tempDir
+      }
+    });
+
+    const inspector = new ArtifactInspector(config);
+    const report = inspector.inspect({
+      cwd: tempDir,
+      latest: true,
+      kind: "run",
+      status: "failed",
+      selectedAgent: "codex"
+    });
+
+    expect(report.entry?.taskId).toBe("task-failed");
+    expect(report.historyFilters?.status).toBe("failed");
+    expect(report.historyFilters?.selectedAgent).toBe("codex");
+    expect(report.taskSnapshot?.type).toBe("fix");
+  });
 });
