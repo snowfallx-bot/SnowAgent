@@ -53,6 +53,39 @@ describe("ValidationService", () => {
     expect(batchResult.summary).toContain("1 task");
   });
 
+  it("expands batch validation into referenced task files", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "snowagent-validate-targets-"));
+    const taskPath = path.join(tempDir, "task.yaml");
+    const promptPath = path.join(tempDir, "prompt.txt");
+    const planPath = path.join(tempDir, "plan.yaml");
+    const service = new ValidationService();
+
+    writeTextFile(promptPath, "Summarize this issue.");
+    writeTextFile(
+      taskPath,
+      [
+        "type: summarize",
+        "promptFile: ./prompt.txt",
+        "cwd: ."
+      ].join("\n")
+    );
+    writeTextFile(
+      planPath,
+      [
+        "continueOnError: true",
+        "tasks:",
+        "  - ./task.yaml"
+      ].join("\n")
+    );
+
+    const results = service.validateBatchTargets(planPath, tempDir);
+
+    expect(results).toHaveLength(2);
+    expect(results[0]?.kind).toBe("batch");
+    expect(results[1]?.kind).toBe("task");
+    expect(results[1]?.valid).toBe(true);
+  });
+
   it("reports invalid batch plans with missing task files", () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "snowagent-validate-batch-"));
     const planPath = path.join(tempDir, "plan.json");

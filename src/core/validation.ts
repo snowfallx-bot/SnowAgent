@@ -140,6 +140,21 @@ export class ValidationService {
     }
   }
 
+  public validateBatchTargets(planFilePath: string, cwd: string): ValidationResult[] {
+    const results = [this.validateBatchPlan(planFilePath, cwd)];
+
+    try {
+      const plan = loadBatchPlan(planFilePath, cwd);
+      for (const item of plan.tasks) {
+        results.push(this.validateTaskFile(item.taskFilePath, cwd));
+      }
+    } catch {
+      return results;
+    }
+
+    return results;
+  }
+
   public buildReport(
     results: ValidationResult[],
     options?: { artifactCwd?: string }
