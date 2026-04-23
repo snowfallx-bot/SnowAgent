@@ -9,6 +9,10 @@ import { Command } from "commander";
 import { AgentRegistry } from "../agents/registry";
 import { loadConfig } from "../config/load-config";
 import { AppConfig } from "../config/schema";
+import {
+  ArtifactInspectionReport,
+  ArtifactInspector
+} from "../core/artifact-inspector";
 import { BatchRunReport, BatchRunnerService, loadBatchPlan } from "../core/batch";
 import { Orchestrator } from "../core/orchestrator";
 import { ConfigReportService } from "../core/config-report";
@@ -31,7 +35,7 @@ import {
   resolveLatestRunTask
 } from "../core/rerun";
 import { Router } from "../core/router";
-import { loadTaskFile } from "../core/task-file";
+import { loadTaskFile, writeTaskFile } from "../core/task-file";
 import { AGENT_NAMES, AgentName, TASK_TYPES, Task } from "../core/task";
 import { ValidationService } from "../core/validation";
 import { ProcessRunner } from "../process/process-runner";
@@ -48,6 +52,7 @@ interface Context {
   preview: PreviewService;
   preflight: PreflightService;
   history: ArtifactHistoryService;
+  inspector: ArtifactInspector;
   configReport: ConfigReportService;
   validation: ValidationService;
   logger: Logger;
@@ -137,6 +142,7 @@ function createContext(
     validation
   );
   const history = new ArtifactHistoryService(config);
+  const inspector = new ArtifactInspector(config);
   const configReport = new ConfigReportService(config, resolvedConfigPath);
   const doctor = new Doctor(config, registry);
 
@@ -150,6 +156,7 @@ function createContext(
     preview,
     preflight,
     history,
+    inspector,
     configReport,
     validation,
     logger
@@ -311,6 +318,48 @@ function printPreflightSummary(
   }
 }
 
+function printArtifactInspectionReport(report: ArtifactInspectionReport): void {
+  console.log(`source: ${report.source}`);
+  console.log(`artifactPath: ${report.artifactPath}`);
+  if (report.kind) {
+    console.log(`kind: ${report.kind}`);
+  }
+  if (report.historyFilter) {
+    console.log(`historyFilter: ${report.historyFilter}`);
+  }
+  if (report.historyIndex) {
+    console.log(`historyIndex: ${report.historyIndex}`);
+  }
+  if (report.historyRootDir) {
+    console.log(`historyRootDir: ${report.historyRootDir}`);
+  }
+  if (report.entry) {
+    console.log(`createdAt: ${report.entry.createdAt}`);
+    console.log(`summary: ${report.entry.summary}`);
+    if (report.entry.status) {
+      console.log(`status: ${report.entry.status}`);
+    }
+    if (report.entry.selectedAgent) {
+      console.log(`selectedAgent: ${report.entry.selectedAgent}`);
+    }
+  }
+  if (report.taskSnapshot) {
+    console.log(`taskId: ${report.taskSnapshot.id}`);
+    console.log(`taskType: ${report.taskSnapshot.type}`);
+    console.log(`taskCwd: ${report.taskSnapshot.cwd}`);
+    console.log(`promptLength: ${report.taskSnapshot.prompt.length}`);
+    if (report.taskSnapshot.preferredAgent) {
+      console.log(`preferredAgent: ${report.taskSnapshot.preferredAgent}`);
+    }
+    if (report.taskSnapshot.fallbackAgents?.length) {
+      console.log(
+        `fallbackAgents: ${report.taskSnapshot.fallbackAgents.join(", ")}`
+      );
+    }
+  }
+  console.log(`topLevelKeys: ${report.topLevelKeys.join(", ") || "(none)"}`);
+}
+
 function parseAgentName(input: string): AgentName {
   if ((AGENT_NAMES as readonly string[]).includes(input)) {
     return input as AgentName;
@@ -325,6 +374,23 @@ function parseTaskType(input: string): Task["type"] {
   }
 
   throw new Error(`Unsupported task type "${input}". Expected one of: ${TASK_TYPES.join(", ")}`);
+}
+
+function parseTaskFileFormat(input: string): "yaml" | "json" {
+  if (input === "yaml" || input === "json") {
+    return input;
+  }
+
+  throw new Error('Unsupported task file format. Expected "yaml" or "json".');
+}
+
+function parsePositiveInteger(input: string, label: string): number {
+  const parsed = Number(input);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(`${label} must be a positive integer.`);
+  }
+
+  return parsed;
 }
 
 function buildTaskFromCliOptions(options: {
@@ -880,7 +946,7 @@ program
     const report = context.history.list({
       cwd,
       kind: options.kind as (typeof HISTORY_KINDS)[number],
-      limit: Number(options.limit)
+      limit: parsePositiveInteger(options.limit, "History limit")
     });
 
     if (options.json) {
@@ -906,6 +972,135 @@ program
         console.log(`  selectedAgent: ${entry.selectedAgent}`);
       }
     }
+  });
+
+program
+  .command("inspect")
+  .description("Inspect one artifact directly or select the latest artifact from history.")
+  .option("--artifact <path>", "Path to a JSON artifact file.")
+  .option("--latest", "Inspect the latest artifact from artifacts/.")
+  .option(
+    "--kind <kind>",
+    `When using --latest, limit selection to: ${HISTORY_KINDS.join(", ")}`,
+    "all"
+  )
+  .option(
+    "--index <count>",
+    "When using --latest, inspect the Nth entry in descending history order.",
+    "1"
+  )
+  .option("--cwd <path>", "Base working directory.", process.cwd())
+  .option("-c, --config <path>", "Path to a JSON/YAML config file.")
+  .option("--json", "Print JSON output.")
+  .action((options: {
+    artifact?: string;
+    latest?: boolean;
+    kind: string;
+    index: string;
+    cwd: string;
+    config?: string;
+    json?: boolean;
+  }) => {
+    const cwd = path.resolve(options.cwd);
+    const context = createContext(options.config, cwd, Boolean(options.json));
+
+    if (options.latest && !(HISTORY_KINDS as readonly string[]).includes(options.kind)) {
+      throw new Error(
+        `Unsupported history kind "${options.kind}". Expected one of: ${HISTORY_KINDS.join(", ")}`
+      );
+    }
+
+    const report = context.inspector.inspect({
+      cwd,
+      artifactPath: options.artifact,
+      latest: Boolean(options.latest),
+      kind: options.kind as (typeof HISTORY_KINDS)[number],
+      index: parsePositiveInteger(options.index, "Inspection index")
+    });
+
+    if (options.json) {
+      printJson(report);
+      return;
+    }
+
+    printArtifactInspectionReport(report);
+  });
+
+program
+  .command("export-task")
+  .description("Export a task snapshot from a run artifact into a reusable task file.")
+  .option("--run-artifact <path>", "Path to an orchestration-result.json artifact.")
+  .option("--latest-run", "Use the most recent run artifact from artifacts/.")
+  .option("--latest-failed", "Use the most recent failed run artifact from artifacts/.")
+  .requiredOption("--output-file <path>", "Write the exported task file to this path.")
+  .option("--format <format>", 'Task file format: "yaml" or "json".')
+  .option("--strip-id", "Omit the task id so a future run generates a fresh one.")
+  .option("--cwd <path>", "Base working directory.", process.cwd())
+  .option("-c, --config <path>", "Path to a JSON/YAML config file.")
+  .option("--json", "Print JSON output.")
+  .action((options: {
+    runArtifact?: string;
+    latestRun?: boolean;
+    latestFailed?: boolean;
+    outputFile: string;
+    format?: string;
+    stripId?: boolean;
+    cwd: string;
+    config?: string;
+    json?: boolean;
+  }) => {
+    const cwd = path.resolve(options.cwd);
+    const context = createContext(options.config, cwd, Boolean(options.json));
+    const activeSources = [
+      options.runArtifact,
+      options.latestRun ? "latest" : undefined,
+      options.latestFailed ? "failed" : undefined
+    ].filter((value) => value !== undefined);
+
+    if (activeSources.length !== 1) {
+      throw new Error(
+        "Provide exactly one of --run-artifact, --latest-run, or --latest-failed."
+      );
+    }
+
+    const resolution = options.runArtifact
+      ? loadTaskFromRunArtifact(options.runArtifact, cwd)
+      : resolveLatestRunTask(context.config, cwd, {
+          failedOnly: Boolean(options.latestFailed)
+        });
+    const written = writeTaskFile(options.outputFile, resolution.task, {
+      cwd,
+      format: options.format ? parseTaskFileFormat(options.format) : undefined,
+      stripId: Boolean(options.stripId)
+    });
+    const output = {
+      source: resolution.source,
+      sourceArtifactPath: resolution.sourceArtifactPath,
+      originalSuccess: resolution.originalSuccess,
+      originalSelectedAgent: resolution.originalSelectedAgent,
+      originalCompletedAt: resolution.originalCompletedAt,
+      outputPath: written.outputPath,
+      format: written.format,
+      taskFile: written.taskFile
+    };
+
+    if (options.json) {
+      printJson(output);
+      return;
+    }
+
+    console.log(`source: ${output.source}`);
+    console.log(`sourceArtifactPath: ${output.sourceArtifactPath}`);
+    if (output.originalCompletedAt) {
+      console.log(`originalCompletedAt: ${output.originalCompletedAt}`);
+    }
+    if (output.originalSelectedAgent) {
+      console.log(`originalSelectedAgent: ${output.originalSelectedAgent}`);
+    }
+    console.log(`outputPath: ${output.outputPath}`);
+    console.log(`format: ${output.format}`);
+    console.log(`taskType: ${output.taskFile.type}`);
+    console.log(`taskCwd: ${output.taskFile.cwd}`);
   });
 
 program

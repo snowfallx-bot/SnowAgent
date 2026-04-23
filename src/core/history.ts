@@ -235,7 +235,9 @@ function parsePreflightEntry(
   };
 }
 
-function classifyArtifact(filePath: string): ArtifactHistoryKind | undefined {
+export function classifyArtifactPath(
+  filePath: string
+): ArtifactHistoryKind | undefined {
   const normalized = filePath.replace(/\\/g, "/");
 
   if (normalized.includes("/doctor/") && normalized.endsWith(".json")) {
@@ -292,7 +294,7 @@ export class ArtifactHistoryService {
     const entries: ArtifactHistoryEntry[] = [];
 
     for (const filePath of walkFiles(rootDir)) {
-      const kind = classifyArtifact(filePath);
+      const kind = classifyArtifactPath(filePath);
       if (!kind || !matchesFilter(kind, filter)) {
         continue;
       }
