@@ -100,4 +100,62 @@ describe("BatchRunnerService", () => {
     expect(report.stoppedEarly).toBe(true);
     expect(report.results).toHaveLength(1);
   });
+
+  it("stores batch artifacts under the execution cwd when provided", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "snowagent-batch-artifacts-"));
+    const planDir = path.join(tempDir, "plans");
+    const taskDir = path.join(tempDir, "tasks");
+    const planPath = path.join(planDir, "demo.batch.yaml");
+    const taskPath = path.join(taskDir, "summarize.task.yaml");
+    const promptPath = path.join(taskDir, "prompt.txt");
+
+    fs.mkdirSync(planDir, { recursive: true });
+    fs.mkdirSync(taskDir, { recursive: true });
+    writeTextFile(promptPath, "Summarize this issue.");
+    writeTextFile(
+      taskPath,
+      [
+        "type: summarize",
+        "promptFile: ./prompt.txt",
+        "cwd: ."
+      ].join("\n")
+    );
+    writeTextFile(
+      planPath,
+      [
+        "tasks:",
+        "  - ../tasks/summarize.task.yaml"
+      ].join("\n")
+    );
+
+    const plan = loadBatchPlan(planPath);
+    const orchestrator = {
+      async run(): Promise<OrchestrationResult> {
+        return {
+          taskId: "task-1",
+          success: true,
+          selectedAgent: "copilot",
+          route: {
+            taskId: "task-1",
+            taskType: "summarize",
+            preferredAgent: "auto",
+            orderedAgents: ["copilot"],
+            reasons: []
+          },
+          attempts: [],
+          prompt: "prompt",
+          artifactDir: path.join(tempDir, "artifacts", "task-1"),
+          startedAt: "2026-04-23T00:00:00.000Z",
+          completedAt: "2026-04-23T00:00:01.000Z"
+        };
+      }
+    };
+
+    const report = await new BatchRunnerService(
+      DEFAULT_CONFIG,
+      orchestrator
+    ).runPlan(plan, { dryRun: true, artifactCwd: tempDir });
+
+    expect(report.artifactPath?.startsWith(path.join(tempDir, "artifacts"))).toBe(true);
+  });
 });

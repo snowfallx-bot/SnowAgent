@@ -108,7 +108,7 @@ export class BatchRunnerService {
 
   public async runPlan(
     plan: LoadedBatchPlan,
-    options: { dryRun?: boolean }
+    options: { dryRun?: boolean; artifactCwd?: string }
   ): Promise<BatchRunReport> {
     const results: BatchTaskResult[] = [];
     let stoppedEarly = false;
@@ -169,9 +169,12 @@ export class BatchRunnerService {
 
     const succeededTasks = results.filter((result) => result.success).length;
     const failedTasks = results.length - succeededTasks;
+    const artifactRootCwd = path.resolve(
+      options.artifactCwd ?? path.dirname(plan.planFilePath)
+    );
     const artifactPath = this.config.artifacts.saveOutputs
       ? path.resolve(
-          path.dirname(plan.planFilePath),
+          artifactRootCwd,
           this.config.artifacts.rootDir,
           "batches",
           `batch-${sanitizePathToken(path.basename(plan.planFilePath, path.extname(plan.planFilePath)))}-${Date.now()}.json`
