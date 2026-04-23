@@ -116,7 +116,7 @@ function createContext(
   );
   const history = new ArtifactHistoryService(config);
   const configReport = new ConfigReportService(config, resolvedConfigPath);
-  const validation = new ValidationService();
+  const validation = new ValidationService(config);
   const doctor = new Doctor(config, registry);
 
   return {
@@ -587,7 +587,7 @@ program
 
 program
   .command("history")
-  .description("List recent doctor, preview, and run artifacts from the artifacts directory.")
+  .description("List recent doctor, preview, validation, batch, and run artifacts.")
   .option("--cwd <path>", "Base working directory.", process.cwd())
   .option(
     "--kind <kind>",
@@ -677,7 +677,9 @@ program
       results.push(context.validation.validateBatchPlan(options.planFile, cwd));
     }
 
-    const report = context.validation.buildReport(results);
+    const report = context.validation.buildReport(results, {
+      artifactCwd: cwd
+    });
 
     if (options.json) {
       printJson(report);
@@ -688,6 +690,9 @@ program
     }
 
     console.log(`allValid: ${report.allValid}`);
+    if (report.artifactPath) {
+      console.log(`artifactPath: ${report.artifactPath}`);
+    }
     for (const result of report.results) {
       console.log(`${result.kind}: ${result.valid ? "valid" : "invalid"}`);
       if (result.path) {
@@ -745,6 +750,9 @@ program
     );
     if (report.artifactPath) {
       console.log(`artifactPath: ${report.artifactPath}`);
+    }
+    if (report.retryPlanPath) {
+      console.log(`retryPlanPath: ${report.retryPlanPath}`);
     }
 
     for (const result of report.results) {

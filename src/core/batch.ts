@@ -5,7 +5,7 @@ import YAML from "yaml";
 import { z } from "zod";
 
 import { AppConfig } from "../config/schema";
-import { writeJsonFile } from "../utils/fs";
+import { writeJsonFile, writeTextFile } from "../utils/fs";
 import { OrchestrationResult } from "./orchestrator";
 import { loadTaskFile } from "./task-file";
 import { Task } from "./task";
@@ -53,8 +53,10 @@ export interface BatchRunReport {
   totalTasks: number;
   succeededTasks: number;
   failedTasks: number;
+  retryTaskCount: number;
   stoppedEarly: boolean;
   artifactPath?: string;
+  retryPlanPath?: string;
   results: BatchTaskResult[];
 }
 
@@ -75,6 +77,14 @@ function parseBatchPlanDocument(planFilePath: string): unknown {
 
 function sanitizePathToken(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]/gu, "-");
+}
+
+function toPortablePath(value: string): string {
+  return value.replace(/\\/g, "/");
+}
+
+function buildTaskKey(taskFilePath: string, label?: string): string {
+  return `${taskFilePath}::${label ?? ""}`;
 }
 
 export function loadBatchPlan(planFilePath: string, cwd = process.cwd()): LoadedBatchPlan {
@@ -169,6 +179,7 @@ export class BatchRunnerService {
 
     const succeededTasks = results.filter((result) => result.success).length;
     const failedTasks = results.length - succeededTasks;
+    const timestamp = Date.now();
     const artifactRootCwd = path.resolve(
       options.artifactCwd ?? path.dirname(plan.planFilePath)
     );
@@ -177,9 +188,49 @@ export class BatchRunnerService {
           artifactRootCwd,
           this.config.artifacts.rootDir,
           "batches",
-          `batch-${sanitizePathToken(path.basename(plan.planFilePath, path.extname(plan.planFilePath)))}-${Date.now()}.json`
+          `batch-${sanitizePathToken(path.basename(plan.planFilePath, path.extname(plan.planFilePath)))}-${timestamp}.json`
         )
       : undefined;
+    const retryPlanPath =
+      this.config.artifacts.saveOutputs && failedTasks > 0
+        ? path.resolve(
+            artifactRootCwd,
+            this.config.artifacts.rootDir,
+            "batches",
+            `retry-${sanitizePathToken(path.basename(plan.planFilePath, path.extname(plan.planFilePath)))}-${timestamp}.yaml`
+          )
+        : undefined;
+
+    if (retryPlanPath) {
+      const retryPlanDir = path.dirname(retryPlanPath);
+      const failedTaskKeys = new Set(
+        results
+          .filter((result) => !result.success)
+          .map((result) => buildTaskKey(result.taskFilePath, result.label))
+      );
+      const retryTasks = plan.tasks
+        .filter((item) => failedTaskKeys.has(buildTaskKey(item.taskFilePath, item.label)))
+        .map((item) => {
+          const relativePath = toPortablePath(path.relative(retryPlanDir, item.taskFilePath));
+
+          if (!item.label) {
+            return relativePath;
+          }
+
+          return {
+            path: relativePath,
+            label: item.label
+          };
+        });
+
+      writeTextFile(
+        retryPlanPath,
+        YAML.stringify({
+          continueOnError: plan.continueOnError,
+          tasks: retryTasks
+        })
+      );
+    }
 
     const report: BatchRunReport = {
       generatedAt: new Date().toISOString(),
@@ -189,8 +240,10 @@ export class BatchRunnerService {
       totalTasks: plan.tasks.length,
       succeededTasks,
       failedTasks,
+      retryTaskCount: failedTasks,
       stoppedEarly,
       artifactPath,
+      retryPlanPath,
       results
     };
 

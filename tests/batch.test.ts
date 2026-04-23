@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import YAML from "yaml";
 
 import { describe, expect, it } from "vitest";
 
@@ -67,9 +68,11 @@ describe("BatchRunnerService", () => {
     expect(report.totalTasks).toBe(1);
     expect(report.succeededTasks).toBe(1);
     expect(report.failedTasks).toBe(0);
+    expect(report.retryTaskCount).toBe(0);
     expect(report.results[0]?.label).toBe("summarize-demo");
     expect(report.results[0]?.selectedAgent).toBe("copilot");
     expect(report.artifactPath && fs.existsSync(report.artifactPath)).toBe(true);
+    expect(report.retryPlanPath).toBeUndefined();
   });
 
   it("stops early when continueOnError is disabled", async () => {
@@ -97,8 +100,10 @@ describe("BatchRunnerService", () => {
     ).runPlan(plan, { dryRun: true });
 
     expect(report.failedTasks).toBe(1);
+    expect(report.retryTaskCount).toBe(1);
     expect(report.stoppedEarly).toBe(true);
     expect(report.results).toHaveLength(1);
+    expect(report.retryPlanPath && fs.existsSync(report.retryPlanPath)).toBe(true);
   });
 
   it("stores batch artifacts under the execution cwd when provided", async () => {
@@ -157,5 +162,110 @@ describe("BatchRunnerService", () => {
     ).runPlan(plan, { dryRun: true, artifactCwd: tempDir });
 
     expect(report.artifactPath?.startsWith(path.join(tempDir, "artifacts"))).toBe(true);
+  });
+
+  it("generates a retry plan for failed tasks only", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "snowagent-batch-retry-"));
+    const planPath = path.join(tempDir, "retry.batch.yaml");
+    const promptPath = path.join(tempDir, "issue.txt");
+    const firstTaskPath = path.join(tempDir, "first.task.yaml");
+    const secondTaskPath = path.join(tempDir, "second.task.yaml");
+
+    writeTextFile(promptPath, "Summarize this issue.");
+    writeTextFile(
+      firstTaskPath,
+      [
+        "type: summarize",
+        "promptFile: ./issue.txt",
+        "cwd: ."
+      ].join("\n")
+    );
+    writeTextFile(
+      secondTaskPath,
+      [
+        "type: review",
+        "promptFile: ./issue.txt",
+        "cwd: ."
+      ].join("\n")
+    );
+    writeTextFile(
+      planPath,
+      [
+        "continueOnError: true",
+        "tasks:",
+        "  - path: ./first.task.yaml",
+        "    label: first",
+        "  - path: ./second.task.yaml",
+        "    label: second"
+      ].join("\n")
+    );
+
+    const plan = loadBatchPlan(planPath);
+    let invocation = 0;
+    const orchestrator = {
+      async run(): Promise<OrchestrationResult> {
+        invocation += 1;
+
+        if (invocation === 1) {
+          return {
+            taskId: "task-1",
+            success: false,
+            route: {
+              taskId: "task-1",
+              taskType: "summarize",
+              preferredAgent: "auto",
+              orderedAgents: ["copilot"],
+              reasons: []
+            },
+            attempts: [],
+            prompt: "prompt",
+            artifactDir: path.join(tempDir, "artifacts", "task-1"),
+            startedAt: "2026-04-23T00:00:00.000Z",
+            completedAt: "2026-04-23T00:00:01.000Z"
+          };
+        }
+
+        return {
+          taskId: "task-2",
+          success: true,
+          selectedAgent: "copilot",
+          route: {
+            taskId: "task-2",
+            taskType: "review",
+            preferredAgent: "auto",
+            orderedAgents: ["copilot"],
+            reasons: []
+          },
+          attempts: [],
+          prompt: "prompt",
+          artifactDir: path.join(tempDir, "artifacts", "task-2"),
+          startedAt: "2026-04-23T00:00:00.000Z",
+          completedAt: "2026-04-23T00:00:01.000Z"
+        };
+      }
+    };
+
+    const report = await new BatchRunnerService(
+      DEFAULT_CONFIG,
+      orchestrator
+    ).runPlan(plan, { dryRun: true, artifactCwd: tempDir });
+
+    expect(report.failedTasks).toBe(1);
+    expect(report.retryTaskCount).toBe(1);
+    expect(report.retryPlanPath && fs.existsSync(report.retryPlanPath)).toBe(true);
+
+    const retryPlan = YAML.parse(
+      fs.readFileSync(report.retryPlanPath as string, "utf8")
+    ) as {
+      continueOnError?: boolean;
+      tasks?: Array<string | { path: string; label?: string }>;
+    };
+
+    expect(retryPlan.continueOnError).toBe(true);
+    expect(retryPlan.tasks).toHaveLength(1);
+    expect(retryPlan.tasks?.[0]).toEqual({
+      path: "../../first.task.yaml",
+      label: "first"
+    });
   });
 });

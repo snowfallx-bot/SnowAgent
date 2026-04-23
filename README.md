@@ -385,15 +385,16 @@ node .\dist\cli\index.js prompt --task-file .\demo\summarize.task.yaml --json
 ```powershell
 node .\dist\cli\index.js history
 node .\dist\cli\index.js history --kind preview --limit 5 --json
+node .\dist\cli\index.js history --kind validation --limit 5 --json
 node .\dist\cli\index.js history --kind batch --limit 5 --json
 node .\dist\cli\index.js history --kind run --limit 10
 ```
 
 这个命令适合：
 
-- 快速回看最近一次 smoke / preview / run 发生了什么
+- 快速回看最近一次 smoke / preview / validation / batch / run 发生了什么
 - 不手动翻目录，直接定位对应 artifact 路径
-- 在脚本里提取最近的 doctor / preview / run 记录
+- 在脚本里提取最近的 doctor / preview / validation / batch / run 记录
 
 ### `validate`
 
@@ -410,6 +411,8 @@ node .\dist\cli\index.js validate --plan-file .\demo\demo.batch.yaml --fail-on-e
 - 在无人值守批量执行前，先把 config/task/batch 文件检查一遍
 - 发现 `promptFile`、task-file 路径、batch plan 引用是否缺失
 - 在脚本里用退出码快速拦住坏输入
+
+每次校验结果也会落到 `artifacts/validation/*.json`，方便后续脚本或 `history --kind validation` 回看。
 
 ### `batch`
 
@@ -439,6 +442,7 @@ tasks:
 - 输出一份批量汇总报告，方便后续脚本读取
 
 批量汇总报告默认会写到执行 `cwd` 对应的 `artifacts/batches/` 下，这样可以直接配合 `history --kind batch` 回看。
+如果批量中有失败项，还会额外生成一个 `retry-*.yaml` 重跑计划，只保留失败任务，方便第二轮继续执行。
 
 ### `run`
 
@@ -505,6 +509,7 @@ PromptBuilder 会要求 agent 输出：
 
 - `session-*.log`
 - `doctor/*.json`
+- `validation/*.json`
 - `previews/*.json`
 - `previews/*.txt`
 - `batches/*.json`
