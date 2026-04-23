@@ -4,9 +4,14 @@ import path from "node:path";
 import { AppConfig } from "../config/schema";
 import { pathExists, readTextFile } from "../utils/fs";
 
-export const HISTORY_KINDS = ["doctor", "preview", "run", "all"] as const;
+export const HISTORY_KINDS = ["doctor", "preview", "run", "batch", "all"] as const;
 export type ArtifactHistoryFilter = (typeof HISTORY_KINDS)[number];
-export type ArtifactHistoryKind = "doctor" | "route_preview" | "prompt_preview" | "run";
+export type ArtifactHistoryKind =
+  | "doctor"
+  | "route_preview"
+  | "prompt_preview"
+  | "run"
+  | "batch";
 
 export interface ArtifactHistoryEntry {
   kind: ArtifactHistoryKind;
@@ -162,6 +167,24 @@ function parseRunEntry(filePath: string, data: Record<string, unknown>): Artifac
   };
 }
 
+function parseBatchEntry(filePath: string, data: Record<string, unknown>): ArtifactHistoryEntry {
+  const succeededTasks =
+    typeof data.succeededTasks === "number" ? data.succeededTasks : 0;
+  const failedTasks = typeof data.failedTasks === "number" ? data.failedTasks : 0;
+  const totalTasks = typeof data.totalTasks === "number" ? data.totalTasks : 0;
+  const stoppedEarly =
+    typeof data.stoppedEarly === "boolean" ? data.stoppedEarly : false;
+
+  return {
+    kind: "batch",
+    path: filePath,
+    createdAt: getString(data.generatedAt) ?? toIsoFallback(filePath),
+    summary: `batch succeeded=${succeededTasks} failed=${failedTasks} total=${totalTasks} stoppedEarly=${stoppedEarly}`,
+    status: failedTasks > 0 ? "failed" : "success",
+    success: failedTasks === 0
+  };
+}
+
 function classifyArtifact(filePath: string): ArtifactHistoryKind | undefined {
   const normalized = filePath.replace(/\\/g, "/");
 
@@ -173,6 +196,10 @@ function classifyArtifact(filePath: string): ArtifactHistoryKind | undefined {
     return path.basename(filePath).startsWith("prompt-")
       ? "prompt_preview"
       : "route_preview";
+  }
+
+  if (normalized.includes("/batches/") && normalized.endsWith(".json")) {
+    return "batch";
   }
 
   if (path.basename(filePath) === "orchestration-result.json") {
@@ -229,6 +256,11 @@ export class ArtifactHistoryService {
 
       if (kind === "route_preview") {
         entries.push(parseRoutePreviewEntry(filePath, data));
+        continue;
+      }
+
+      if (kind === "batch") {
+        entries.push(parseBatchEntry(filePath, data));
         continue;
       }
 
