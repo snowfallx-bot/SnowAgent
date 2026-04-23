@@ -61,6 +61,7 @@ export interface RetentionExecutionOptions {
   cwd: string;
   kind?: RetentionPolicyKind;
   apply?: boolean;
+  persistReport?: boolean;
 }
 
 function sanitizePathToken(value: string): string {
@@ -159,7 +160,7 @@ export class RetentionService {
       });
     }
 
-    const artifactPath = this.config.artifacts.saveOutputs
+    const artifactPath = this.config.artifacts.saveOutputs && options.persistReport !== false
       ? path.resolve(
           options.cwd,
           this.config.artifacts.rootDir,

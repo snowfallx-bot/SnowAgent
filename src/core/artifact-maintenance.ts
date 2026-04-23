@@ -7,6 +7,7 @@ import { ArtifactHistoryEntry, ArtifactHistoryFilter, ArtifactHistoryService } f
 
 export const ARTIFACT_FILTER_KINDS = [
   "doctor",
+  "status",
   "preview",
   "preflight",
   "run",
@@ -22,6 +23,7 @@ export type ArtifactFilterKind = (typeof ARTIFACT_FILTER_KINDS)[number];
 
 export const PRUNABLE_ARTIFACT_KINDS = [
   "doctor",
+  "status",
   "preview",
   "preflight",
   "run",
@@ -83,6 +85,7 @@ export interface ArtifactInventoryOptions {
   status?: string;
   taskId?: string;
   selectedAgent?: string;
+  persistReport?: boolean;
 }
 
 export interface ArtifactPruneCandidate {
@@ -312,6 +315,7 @@ function buildKindSummary(
 function toHistoryFilter(kind: ArtifactFilterKind): ArtifactHistoryFilter {
   if (
     kind === "doctor" ||
+    kind === "status" ||
     kind === "preview" ||
     kind === "preflight" ||
     kind === "run" ||
@@ -498,7 +502,10 @@ export class ArtifactMaintenanceService {
       kinds
     };
 
-    const artifactPath = this.resolveReportPath(options.cwd, "inventory", filter);
+    const artifactPath =
+      options.persistReport === false
+        ? undefined
+        : this.resolveReportPath(options.cwd, "inventory", filter);
     if (artifactPath) {
       report.artifactPath = artifactPath;
       writeJsonFile(artifactPath, report);

@@ -12,6 +12,7 @@ export interface DoctorOptions {
   agentNames?: AgentName[];
   timeoutMs?: number;
   prompt?: string;
+  persistReport?: boolean;
 }
 
 export type DoctorHealthStatus = "healthy" | "warning" | "unhealthy";
@@ -437,7 +438,7 @@ export class Doctor {
     }
 
     const summary = buildSummary(reports);
-    const artifactPath = this.config.artifacts.saveOutputs
+    const artifactPath = this.config.artifacts.saveOutputs && options.persistReport !== false
       ? path.resolve(
           options.cwd,
           this.config.artifacts.rootDir,

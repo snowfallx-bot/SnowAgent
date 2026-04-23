@@ -158,4 +158,33 @@ describe("ArtifactInspector", () => {
     expect(report.topLevelKeys).toContain("mode");
     expect(report.taskSnapshot).toBeUndefined();
   });
+
+  it("inspects the latest status artifact", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "snowagent-inspect-status-"));
+    const config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+    const statusDir = path.join(tempDir, config.artifacts.rootDir, "status");
+
+    ensureDir(statusDir);
+    writeJsonFile(path.join(statusDir, "status-1.json"), {
+      generatedAt: "2026-04-23T00:00:05.000Z",
+      summary: {
+        status: "warning",
+        doctorStatus: "healthy",
+        retentionMatches: 1,
+        failedRuns: 1,
+        failedBatches: 0
+      }
+    });
+
+    const inspector = new ArtifactInspector(config);
+    const report = inspector.inspect({
+      cwd: tempDir,
+      latest: true,
+      kind: "status"
+    });
+
+    expect(report.kind).toBe("status");
+    expect(report.entry?.status).toBe("warning");
+    expect(report.topLevelKeys).toContain("summary");
+  });
 });

@@ -48,6 +48,7 @@ describe("DEFAULT_CONFIG agent presets", () => {
 
     expect(RETENTION_POLICY_KINDS).toEqual([
       "doctor",
+      "status",
       "preview",
       "preflight",
       "run",
@@ -60,6 +61,11 @@ describe("DEFAULT_CONFIG agent presets", () => {
       enabled: true,
       olderThanDays: 14,
       keepLatest: 20
+    });
+    expect(retention.status).toEqual({
+      enabled: true,
+      olderThanDays: 14,
+      keepLatest: 30
     });
     expect(retention.run).toEqual({
       enabled: false,

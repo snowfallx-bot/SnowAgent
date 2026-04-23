@@ -4,10 +4,11 @@ import path from "node:path";
 import { AppConfig } from "../config/schema";
 import { pathExists, readTextFile } from "../utils/fs";
 
-export const HISTORY_KINDS = ["doctor", "preview", "preflight", "run", "batch", "validation", "maintenance", "all"] as const;
+export const HISTORY_KINDS = ["doctor", "status", "preview", "preflight", "run", "batch", "validation", "maintenance", "all"] as const;
 export type ArtifactHistoryFilter = (typeof HISTORY_KINDS)[number];
 export type ArtifactHistoryKind =
   | "doctor"
+  | "status"
   | "route_preview"
   | "prompt_preview"
   | "preflight"
@@ -114,6 +115,26 @@ function parseDoctorEntry(filePath: string, data: Record<string, unknown>): Arti
     path: filePath,
     createdAt: getString(data.generatedAt) ?? toIsoFallback(filePath),
     summary: `doctor status=${status ?? "unknown"} healthy=${healthyAgents} warning=${warningAgents} unhealthy=${unhealthyAgents}`,
+    status
+  };
+}
+
+function parseStatusEntry(filePath: string, data: Record<string, unknown>): ArtifactHistoryEntry {
+  const summary = isPlainObject(data.summary) ? data.summary : {};
+  const status = getString(summary.status);
+  const doctorStatus = getString(summary.doctorStatus);
+  const retentionMatches =
+    typeof summary.retentionMatches === "number" ? summary.retentionMatches : 0;
+  const failedRuns =
+    typeof summary.failedRuns === "number" ? summary.failedRuns : 0;
+  const failedBatches =
+    typeof summary.failedBatches === "number" ? summary.failedBatches : 0;
+
+  return {
+    kind: "status",
+    path: filePath,
+    createdAt: getString(data.generatedAt) ?? toIsoFallback(filePath),
+    summary: `status status=${status ?? "unknown"} doctor=${doctorStatus ?? "unknown"} retentionMatches=${retentionMatches} failedRuns=${failedRuns} failedBatches=${failedBatches}`,
     status
   };
 }
@@ -294,6 +315,10 @@ export function classifyArtifactPath(
     return "doctor";
   }
 
+  if (normalized.includes("/status/") && normalized.endsWith(".json")) {
+    return "status";
+  }
+
   if (normalized.includes("/previews/") && normalized.endsWith(".json")) {
     return path.basename(filePath).startsWith("prompt-")
       ? "prompt_preview"
@@ -380,6 +405,8 @@ export class ArtifactHistoryService {
       const entry =
         kind === "doctor"
           ? parseDoctorEntry(filePath, data)
+          : kind === "status"
+            ? parseStatusEntry(filePath, data)
           : kind === "prompt_preview"
             ? parsePromptPreviewEntry(filePath, data)
             : kind === "route_preview"

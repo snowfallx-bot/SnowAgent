@@ -9,6 +9,7 @@ const agentNameSchema = z.enum(AGENT_NAMES);
 const taskTypeSchema = z.enum(TASK_TYPES);
 export const RETENTION_POLICY_KINDS = [
   "doctor",
+  "status",
   "preview",
   "preflight",
   "run",
@@ -228,6 +229,11 @@ function buildRetentionDefaults(): RetentionConfig {
       enabled: true,
       olderThanDays: 30,
       keepLatest: 20
+    },
+    status: {
+      enabled: true,
+      olderThanDays: 14,
+      keepLatest: 30
     },
     preview: {
       enabled: true,
