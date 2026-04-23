@@ -8,7 +8,7 @@ import { Command } from "commander";
 
 import { AgentRegistry } from "../agents/registry";
 import { loadConfig } from "../config/load-config";
-import { AppConfig } from "../config/schema";
+import { AppConfig, RETENTION_POLICY_KINDS } from "../config/schema";
 import {
   ArtifactInspectionReport,
   ArtifactInspector
@@ -41,6 +41,11 @@ import {
   loadTaskFromRunArtifact,
   resolveLatestRunTask
 } from "../core/rerun";
+import {
+  RetentionExecutionReport,
+  RetentionPolicyReport,
+  RetentionService
+} from "../core/retention";
 import { Router } from "../core/router";
 import { loadTaskFile, writeTaskFile } from "../core/task-file";
 import { AGENT_NAMES, AgentName, TASK_TYPES, Task } from "../core/task";
@@ -61,6 +66,7 @@ interface Context {
   history: ArtifactHistoryService;
   inspector: ArtifactInspector;
   artifacts: ArtifactMaintenanceService;
+  retention: RetentionService;
   configReport: ConfigReportService;
   validation: ValidationService;
   logger: Logger;
@@ -152,6 +158,7 @@ function createContext(
   const history = new ArtifactHistoryService(config);
   const inspector = new ArtifactInspector(config);
   const artifacts = new ArtifactMaintenanceService(config);
+  const retention = new RetentionService(config);
   const configReport = new ConfigReportService(config, resolvedConfigPath);
   const doctor = new Doctor(config, registry);
 
@@ -167,6 +174,7 @@ function createContext(
     history,
     inspector,
     artifacts,
+    retention,
     configReport,
     validation,
     logger
@@ -455,6 +463,61 @@ function printArtifactPruneReport(report: ArtifactPruneReport): void {
   }
 }
 
+function printRetentionPolicyReport(report: RetentionPolicyReport): void {
+  console.log(`rootDir: ${report.rootDir}`);
+  console.log(`filter: ${report.filter}`);
+  console.log(`enabledPolicies: ${report.enabledPolicyCount}/${report.policyCount}`);
+  for (const policy of report.policies) {
+    console.log(`${policy.kind}: ${policy.enabled ? "enabled" : "disabled"}`);
+    if (policy.keepLatest !== undefined) {
+      console.log(`  keepLatest: ${policy.keepLatest}`);
+    }
+    if (policy.olderThanDays !== undefined) {
+      console.log(`  olderThanDays: ${policy.olderThanDays}`);
+    }
+    if (policy.status) {
+      console.log(`  status: ${policy.status}`);
+    }
+    if (policy.selectedAgent) {
+      console.log(`  selectedAgent: ${policy.selectedAgent}`);
+    }
+  }
+}
+
+function printRetentionExecutionReport(report: RetentionExecutionReport): void {
+  console.log(`rootDir: ${report.rootDir}`);
+  console.log(`filter: ${report.filter}`);
+  console.log(`dryRun: ${report.dryRun}`);
+  if (report.artifactPath) {
+    console.log(`artifactPath: ${report.artifactPath}`);
+  }
+  console.log(
+    `summary: executed=${report.executedPolicies} skipped=${report.skippedPolicies} policies=${report.totalPolicies} matchedUnits=${report.matchedUnitCount} matchedFiles=${report.matchedFileCount} reclaimableBytes=${report.reclaimableBytes} (${formatByteSize(report.reclaimableBytes)})`
+  );
+  for (const result of report.results) {
+    console.log(`${result.kind}: ${result.skipped ? "skipped" : "evaluated"}`);
+    if (result.reason) {
+      console.log(`  reason: ${result.reason}`);
+    }
+    if (result.policy.keepLatest !== undefined) {
+      console.log(`  keepLatest: ${result.policy.keepLatest}`);
+    }
+    if (result.policy.olderThanDays !== undefined) {
+      console.log(`  olderThanDays: ${result.policy.olderThanDays}`);
+    }
+    if (result.policy.status) {
+      console.log(`  status: ${result.policy.status}`);
+    }
+    if (result.policy.selectedAgent) {
+      console.log(`  selectedAgent: ${result.policy.selectedAgent}`);
+    }
+    if (result.prune) {
+      console.log(`  matchedUnits: ${result.prune.matchedUnitCount}`);
+      console.log(`  reclaimableBytes: ${result.prune.reclaimableBytes} (${formatByteSize(result.prune.reclaimableBytes)})`);
+    }
+  }
+}
+
 function parseAgentName(input: string): AgentName {
   if ((AGENT_NAMES as readonly string[]).includes(input)) {
     return input as AgentName;
@@ -521,6 +584,16 @@ function parsePrunableArtifactKind(input: string): (typeof PRUNABLE_ARTIFACT_KIN
 
   throw new Error(
     `Unsupported prunable artifact kind "${input}". Expected one of: ${PRUNABLE_ARTIFACT_KINDS.join(", ")}`
+  );
+}
+
+function parseRetentionPolicyKind(input: string): (typeof RETENTION_POLICY_KINDS)[number] {
+  if ((RETENTION_POLICY_KINDS as readonly string[]).includes(input)) {
+    return input as (typeof RETENTION_POLICY_KINDS)[number];
+  }
+
+  throw new Error(
+    `Unsupported retention kind "${input}". Expected one of: ${RETENTION_POLICY_KINDS.join(", ")}`
   );
 }
 
@@ -650,6 +723,12 @@ program
     console.log(
       `artifacts: rootDir=${report.artifacts.rootDir} saveOutputs=${report.artifacts.saveOutputs} savePromptFiles=${report.artifacts.savePromptFiles} saveLogs=${report.artifacts.saveLogs}`
     );
+    for (const kind of RETENTION_POLICY_KINDS) {
+      const policy = report.retention[kind];
+      console.log(
+        `retention.${kind}: enabled=${policy.enabled} keepLatest=${policy.keepLatest ?? "(none)"} olderThanDays=${policy.olderThanDays ?? "(none)"} status=${policy.status ?? "(any)"} selectedAgent=${policy.selectedAgent ?? "(any)"}`
+      );
+    }
     for (const taskType of TASK_TYPES) {
       console.log(`route.${taskType}: ${report.routing[taskType].join(" -> ")}`);
     }
@@ -1291,6 +1370,84 @@ program
     }
 
     printArtifactPruneReport(report);
+    if (options.failOnMatch && report.matchedUnitCount > 0) {
+      process.exitCode = 1;
+    }
+  });
+
+program
+  .command("retention")
+  .description("Inspect the configured artifact retention policies.")
+  .option("--cwd <path>", "Base working directory.", process.cwd())
+  .option(
+    "--kind <kind>",
+    `Retention policy kind: ${RETENTION_POLICY_KINDS.join(", ")}`
+  )
+  .option("-c, --config <path>", "Path to a JSON/YAML config file.")
+  .option("--json", "Print JSON output.")
+  .action((options: {
+    cwd: string;
+    kind?: string;
+    config?: string;
+    json?: boolean;
+  }) => {
+    const cwd = path.resolve(options.cwd);
+    const context = createContext(options.config, cwd, Boolean(options.json));
+    const report = context.retention.inspect(
+      cwd,
+      options.kind ? parseRetentionPolicyKind(options.kind) : undefined
+    );
+
+    if (options.json) {
+      printJson(report);
+      return;
+    }
+
+    printRetentionPolicyReport(report);
+  });
+
+program
+  .command("apply-retention")
+  .description(
+    "Dry-run or apply the configured artifact retention policies as one aggregated maintenance step."
+  )
+  .option("--cwd <path>", "Base working directory.", process.cwd())
+  .option(
+    "--kind <kind>",
+    `Retention policy kind: ${RETENTION_POLICY_KINDS.join(", ")}`
+  )
+  .option(
+    "--fail-on-match",
+    "Exit with code 1 when any retention policy matches artifacts under the current filter."
+  )
+  .option("--apply", "Actually delete matched artifacts. Without this flag, the command is dry-run.")
+  .option("-c, --config <path>", "Path to a JSON/YAML config file.")
+  .option("--json", "Print JSON output.")
+  .action((options: {
+    cwd: string;
+    kind?: string;
+    failOnMatch?: boolean;
+    apply?: boolean;
+    config?: string;
+    json?: boolean;
+  }) => {
+    const cwd = path.resolve(options.cwd);
+    const context = createContext(options.config, cwd, Boolean(options.json));
+    const report = context.retention.execute({
+      cwd,
+      kind: options.kind ? parseRetentionPolicyKind(options.kind) : undefined,
+      apply: Boolean(options.apply)
+    });
+
+    if (options.json) {
+      printJson(report);
+      if (options.failOnMatch && report.matchedUnitCount > 0) {
+        process.exitCode = 1;
+      }
+      return;
+    }
+
+    printRetentionExecutionReport(report);
     if (options.failOnMatch && report.matchedUnitCount > 0) {
       process.exitCode = 1;
     }
