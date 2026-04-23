@@ -26,6 +26,10 @@ import {
   resolveLatestFailedRetryPlan,
   resolveRetryPlanFromBatchReport
 } from "../core/retry";
+import {
+  loadTaskFromRunArtifact,
+  resolveLatestRunTask
+} from "../core/rerun";
 import { Router } from "../core/router";
 import { loadTaskFile } from "../core/task-file";
 import { AGENT_NAMES, AgentName, TASK_TYPES, Task } from "../core/task";
@@ -187,6 +191,43 @@ function printBatchRunReport(report: BatchRunReport): void {
     }
     if (result.error) {
       console.log(`  error: ${result.error}`);
+    }
+  }
+}
+
+function printOrchestrationResult(
+  result: {
+    taskId: string;
+    success: boolean;
+    selectedAgent?: string;
+    artifactDir: string;
+    attempts: Array<{
+      agentName: string;
+      success: boolean;
+      reason: string;
+      result?: {
+        commandLine?: string;
+        parsed?: { data?: unknown };
+      };
+    }>;
+  },
+  taskFilePath?: string
+): void {
+  console.log(`taskId: ${result.taskId}`);
+  console.log(`success: ${result.success}`);
+  console.log(`selectedAgent: ${result.selectedAgent ?? "none"}`);
+  if (taskFilePath) {
+    console.log(`taskFile: ${taskFilePath}`);
+  }
+  console.log(`artifactDir: ${result.artifactDir}`);
+
+  for (const attempt of result.attempts) {
+    console.log(`- ${attempt.agentName}: ${attempt.success ? "success" : "failed"} (${attempt.reason})`);
+    if (attempt.result?.commandLine) {
+      console.log(`  command: ${attempt.result.commandLine}`);
+    }
+    if (attempt.result?.parsed?.data) {
+      console.log(`  parsed: ${JSON.stringify(attempt.result.parsed.data)}`);
     }
   }
 }
@@ -1140,6 +1181,129 @@ program
   });
 
 program
+  .command("rerun")
+  .description("Re-run a historical task from a run artifact or from the latest run entry.")
+  .option("--run-artifact <path>", "Path to an orchestration-result.json artifact.")
+  .option("--latest-run", "Use the most recent run artifact from artifacts/.")
+  .option("--latest-failed", "Use the most recent failed run artifact from artifacts/.")
+  .option("--cwd <path>", "Base working directory.", process.cwd())
+  .option("--dry-run", "Build route and commands without launching the agent process.")
+  .option("--preflight", "Run preflight before re-running the task.")
+  .option(
+    "--skip-preflight-detect",
+    "When using --preflight, skip live agent detection and only inspect config/routing."
+  )
+  .option(
+    "--fail-on-preflight-warning",
+    "When using --preflight, also stop when preflight status is warning."
+  )
+  .option("-c, --config <path>", "Path to a JSON/YAML config file.")
+  .option("--json", "Print JSON output.")
+  .action(async (options: {
+    runArtifact?: string;
+    latestRun?: boolean;
+    latestFailed?: boolean;
+    cwd: string;
+    dryRun?: boolean;
+    preflight?: boolean;
+    skipPreflightDetect?: boolean;
+    failOnPreflightWarning?: boolean;
+    config?: string;
+    json?: boolean;
+  }) => {
+    const cwd = path.resolve(options.cwd);
+    const context = createContext(options.config, cwd, Boolean(options.json));
+    const activeSources = [
+      options.runArtifact,
+      options.latestRun ? "latest" : undefined,
+      options.latestFailed ? "failed" : undefined
+    ].filter((value) => value !== undefined);
+
+    if (activeSources.length !== 1) {
+      throw new Error(
+        "Provide exactly one of --run-artifact, --latest-run, or --latest-failed."
+      );
+    }
+
+    const resolution = options.runArtifact
+      ? loadTaskFromRunArtifact(options.runArtifact, cwd)
+      : resolveLatestRunTask(context.config, cwd, {
+          failedOnly: Boolean(options.latestFailed)
+        });
+    const preflight = options.preflight
+      ? await context.preflight.inspectTask(resolution.task, {
+          includeDetection: !options.skipPreflightDetect,
+          artifactCwd: resolution.task.cwd
+        })
+      : undefined;
+
+    if (preflight && shouldStopForPreflight(preflight.status, Boolean(options.failOnPreflightWarning))) {
+      const output = {
+        source: resolution.source,
+        sourceArtifactPath: resolution.sourceArtifactPath,
+        originalSuccess: resolution.originalSuccess,
+        originalSelectedAgent: resolution.originalSelectedAgent,
+        originalCompletedAt: resolution.originalCompletedAt,
+        preflight,
+        skipped: true,
+        skipReason:
+          preflight.status === "blocked"
+            ? "Rerun was skipped because preflight status is blocked."
+            : "Rerun was skipped because preflight status is warning and fail-on-preflight-warning is enabled."
+      };
+
+      if (options.json) {
+        printJson(output);
+      } else {
+        console.log(`source: ${output.source}`);
+        console.log(`sourceArtifactPath: ${output.sourceArtifactPath}`);
+        if (output.originalCompletedAt) {
+          console.log(`originalCompletedAt: ${output.originalCompletedAt}`);
+        }
+        if (output.originalSelectedAgent) {
+          console.log(`originalSelectedAgent: ${output.originalSelectedAgent}`);
+        }
+        printPreflightSummary(preflight);
+        console.log(`skipReason: ${output.skipReason}`);
+      }
+
+      process.exitCode = 1;
+      return;
+    }
+
+    const result = await context.orchestrator.run(resolution.task, {
+      dryRun: Boolean(options.dryRun)
+    });
+    const output = {
+      source: resolution.source,
+      sourceArtifactPath: resolution.sourceArtifactPath,
+      originalSuccess: resolution.originalSuccess,
+      originalSelectedAgent: resolution.originalSelectedAgent,
+      originalCompletedAt: resolution.originalCompletedAt,
+      preflight,
+      result
+    };
+
+    if (options.json) {
+      printJson(output);
+      return;
+    }
+
+    console.log(`source: ${output.source}`);
+    console.log(`sourceArtifactPath: ${output.sourceArtifactPath}`);
+    if (output.originalCompletedAt) {
+      console.log(`originalCompletedAt: ${output.originalCompletedAt}`);
+    }
+    if (output.originalSelectedAgent) {
+      console.log(`originalSelectedAgent: ${output.originalSelectedAgent}`);
+    }
+    if (preflight) {
+      printPreflightSummary(preflight);
+    }
+    printOrchestrationResult(result);
+  });
+
+program
   .command("run")
   .description("Run a task through the router/orchestrator.")
   .option("--task <type>", `Task type: ${TASK_TYPES.join(", ")}`)
@@ -1236,23 +1400,7 @@ program
       if (preflight) {
         printPreflightSummary(preflight);
       }
-      console.log(`taskId: ${result.taskId}`);
-      console.log(`success: ${result.success}`);
-      console.log(`selectedAgent: ${result.selectedAgent ?? "none"}`);
-      if (taskFilePath) {
-        console.log(`taskFile: ${taskFilePath}`);
-      }
-      console.log(`artifactDir: ${result.artifactDir}`);
-
-      for (const attempt of result.attempts) {
-        console.log(`- ${attempt.agentName}: ${attempt.success ? "success" : "failed"} (${attempt.reason})`);
-        if (attempt.result?.commandLine) {
-          console.log(`  command: ${attempt.result.commandLine}`);
-        }
-        if (attempt.result?.parsed?.data) {
-          console.log(`  parsed: ${JSON.stringify(attempt.result.parsed.data)}`);
-        }
-      }
+      printOrchestrationResult(result, taskFilePath);
     }
   );
 
