@@ -4,12 +4,13 @@ import path from "node:path";
 import { AppConfig } from "../config/schema";
 import { pathExists, readTextFile } from "../utils/fs";
 
-export const HISTORY_KINDS = ["doctor", "preview", "run", "batch", "validation", "all"] as const;
+export const HISTORY_KINDS = ["doctor", "preview", "preflight", "run", "batch", "validation", "all"] as const;
 export type ArtifactHistoryFilter = (typeof HISTORY_KINDS)[number];
 export type ArtifactHistoryKind =
   | "doctor"
   | "route_preview"
   | "prompt_preview"
+  | "preflight"
   | "run"
   | "batch"
   | "validation";
@@ -207,6 +208,33 @@ function parseValidationEntry(
   };
 }
 
+function parsePreflightEntry(
+  filePath: string,
+  data: Record<string, unknown>
+): ArtifactHistoryEntry {
+  const mode = getString(data.mode) ?? "unknown";
+  const status = getString(data.status);
+  const task = isPlainObject(data.task) ? data.task : {};
+  const summary = isPlainObject(data.summary) ? data.summary : {};
+  const taskType = getString(task.type);
+  const totalTasks = typeof summary.totalTasks === "number" ? summary.totalTasks : undefined;
+  const blockedTasks = typeof summary.blockedTasks === "number" ? summary.blockedTasks : undefined;
+
+  return {
+    kind: "preflight",
+    path: filePath,
+    createdAt: getString(data.generatedAt) ?? toIsoFallback(filePath),
+    summary:
+      mode === "batch"
+        ? `preflight batch status=${status ?? "unknown"} total=${totalTasks ?? 0} blocked=${blockedTasks ?? 0}`
+        : `preflight task status=${status ?? "unknown"} taskType=${taskType ?? "unknown"}`,
+    status,
+    taskId: getString(task.id),
+    taskType,
+    success: status === undefined ? undefined : status !== "blocked"
+  };
+}
+
 function classifyArtifact(filePath: string): ArtifactHistoryKind | undefined {
   const normalized = filePath.replace(/\\/g, "/");
 
@@ -218,6 +246,10 @@ function classifyArtifact(filePath: string): ArtifactHistoryKind | undefined {
     return path.basename(filePath).startsWith("prompt-")
       ? "prompt_preview"
       : "route_preview";
+  }
+
+  if (normalized.includes("/preflight/") && normalized.endsWith(".json")) {
+    return "preflight";
   }
 
   if (normalized.includes("/batches/") && normalized.endsWith(".json")) {
@@ -282,6 +314,11 @@ export class ArtifactHistoryService {
 
       if (kind === "route_preview") {
         entries.push(parseRoutePreviewEntry(filePath, data));
+        continue;
+      }
+
+      if (kind === "preflight") {
+        entries.push(parsePreflightEntry(filePath, data));
         continue;
       }
 

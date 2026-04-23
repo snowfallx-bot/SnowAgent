@@ -9,13 +9,14 @@ import { ArtifactHistoryService } from "../src/core/history";
 import { ensureDir, writeJsonFile } from "../src/utils/fs";
 
 describe("ArtifactHistoryService", () => {
-  it("lists recent doctor, preview, validation, batch, and run artifacts", () => {
+  it("lists recent doctor, preview, preflight, validation, batch, and run artifacts", () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "snowagent-history-"));
     const config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
     const artifactsRoot = path.join(tempDir, config.artifacts.rootDir);
 
     ensureDir(path.join(artifactsRoot, "doctor"));
     ensureDir(path.join(artifactsRoot, "previews"));
+    ensureDir(path.join(artifactsRoot, "preflight"));
     ensureDir(path.join(artifactsRoot, "batches"));
     ensureDir(path.join(artifactsRoot, "validation"));
     ensureDir(path.join(artifactsRoot, "task-1"));
@@ -46,6 +47,15 @@ describe("ArtifactHistoryService", () => {
         type: "summarize"
       },
       promptLength: 321
+    });
+    writeJsonFile(path.join(artifactsRoot, "preflight", "preflight-1.json"), {
+      generatedAt: "2026-04-23T00:00:04.500Z",
+      mode: "task",
+      status: "warning",
+      task: {
+        id: "preflight-1",
+        type: "fix"
+      }
     });
     writeJsonFile(path.join(artifactsRoot, "batches", "batch-1.json"), {
       generatedAt: "2026-04-23T00:00:05.000Z",
@@ -79,13 +89,14 @@ describe("ArtifactHistoryService", () => {
       kind: "all"
     });
 
-    expect(report.totalEntries).toBe(6);
+    expect(report.totalEntries).toBe(7);
     expect(report.entries[0]?.kind).toBe("validation");
     expect(report.entries[1]?.kind).toBe("batch");
-    expect(report.entries[2]?.kind).toBe("prompt_preview");
-    expect(report.entries[3]?.kind).toBe("doctor");
-    expect(report.entries[4]?.kind).toBe("route_preview");
-    expect(report.entries[5]?.kind).toBe("run");
+    expect(report.entries[2]?.kind).toBe("preflight");
+    expect(report.entries[3]?.kind).toBe("prompt_preview");
+    expect(report.entries[4]?.kind).toBe("doctor");
+    expect(report.entries[5]?.kind).toBe("route_preview");
+    expect(report.entries[6]?.kind).toBe("run");
   });
 
   it("filters preview entries and respects the limit", () => {
@@ -168,5 +179,33 @@ describe("ArtifactHistoryService", () => {
     expect(report.totalEntries).toBe(1);
     expect(report.entries[0]?.kind).toBe("validation");
     expect(report.entries[0]?.status).toBe("success");
+  });
+
+  it("filters preflight entries", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "snowagent-history-preflight-"));
+    const config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+    const preflightDir = path.join(tempDir, config.artifacts.rootDir, "preflight");
+
+    ensureDir(preflightDir);
+    writeJsonFile(path.join(preflightDir, "preflight-1.json"), {
+      generatedAt: "2026-04-23T00:00:01.000Z",
+      mode: "batch",
+      status: "blocked",
+      summary: {
+        totalTasks: 2,
+        blockedTasks: 1
+      }
+    });
+
+    const history = new ArtifactHistoryService(config);
+    const report = history.list({
+      cwd: tempDir,
+      limit: 5,
+      kind: "preflight"
+    });
+
+    expect(report.totalEntries).toBe(1);
+    expect(report.entries[0]?.kind).toBe("preflight");
+    expect(report.entries[0]?.status).toBe("blocked");
   });
 });
