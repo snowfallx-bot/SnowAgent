@@ -490,6 +490,7 @@ node .\dist\cli\index.js inspect --latest --kind maintenance --json
 node .\dist\cli\index.js prune-artifacts --kind log --keep-latest 10
 node .\dist\cli\index.js prune-artifacts --kind preview --older-than-days 7 --json
 node .\dist\cli\index.js prune-artifacts --kind run --status success --keep-latest 5 --apply
+node .\dist\cli\index.js prune-artifacts --kind log --keep-latest 20 --fail-on-match
 ```
 
 这个命令适合：
@@ -497,6 +498,7 @@ node .\dist\cli\index.js prune-artifacts --kind run --status success --keep-late
 - 定期压缩 session log 数量，只保留最近几份
 - 清理很久以前的 preview / preflight / validation 结果
 - 对成功 run 做保留最近 N 份的策略，同时把失败 run 留久一点单独排查
+- 用 `--fail-on-match` 把“发现可清理垃圾”直接转换成退出码，方便巡检脚本或 CI
 
 说明：
 
