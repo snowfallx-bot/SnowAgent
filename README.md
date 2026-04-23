@@ -404,6 +404,8 @@ node .\dist\cli\index.js history --kind preflight --limit 5 --json
 node .\dist\cli\index.js history --kind validation --limit 5 --json
 node .\dist\cli\index.js history --kind batch --limit 5 --json
 node .\dist\cli\index.js history --kind run --limit 10
+node .\dist\cli\index.js history --kind run --status failed --agent codex --json
+node .\dist\cli\index.js history --kind run --task-id demo --limit 3
 ```
 
 这个命令适合：
@@ -411,6 +413,7 @@ node .\dist\cli\index.js history --kind run --limit 10
 - 快速回看最近一次 smoke / preview / preflight / validation / batch / run 发生了什么
 - 不手动翻目录，直接定位对应 artifact 路径
 - 在脚本里提取最近的 doctor / preview / preflight / validation / batch / run 记录
+- 用 `--status` / `--task-id` / `--agent` 把列表快速缩到你关心的那一类记录
 
 ### `inspect`
 
@@ -420,6 +423,7 @@ node .\dist\cli\index.js history --kind run --limit 10
 node .\dist\cli\index.js inspect --artifact .\artifacts\some-task\orchestration-result.json
 node .\dist\cli\index.js inspect --latest --kind run --json
 node .\dist\cli\index.js inspect --latest --kind batch --index 2
+node .\dist\cli\index.js inspect --latest --kind run --status failed --agent codex
 ```
 
 这个命令适合：
@@ -427,6 +431,7 @@ node .\dist\cli\index.js inspect --latest --kind batch --index 2
 - 直接从最新 run / batch / preflight / doctor 结果里看详细上下文
 - 不自己打开 JSON 文件，也能快速知道 artifact 里有没有 task snapshot
 - 配合 `history` 先看列表，再用 `inspect` 展开第 N 条
+- 先用过滤条件锁定某个失败 run，再直接展开那一条 artifact
 
 ### `export-task`
 
