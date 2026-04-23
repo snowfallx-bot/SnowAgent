@@ -411,6 +411,7 @@ node .\dist\cli\index.js validate --plan-file .\demo\demo.batch.yaml --fail-on-e
 - 在无人值守批量执行前，先把 config/task/batch 文件检查一遍
 - 发现 `promptFile`、task-file 路径、batch plan 引用是否缺失
 - 在脚本里用退出码快速拦住坏输入
+- 对 `--plan-file`，会继续把它引用到的每个 task-file 一并校验
 
 每次校验结果也会落到 `artifacts/validation/*.json`，方便后续脚本或 `history --kind validation` 回看。
 

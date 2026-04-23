@@ -674,7 +674,7 @@ program
     }
 
     if (options.planFile) {
-      results.push(context.validation.validateBatchPlan(options.planFile, cwd));
+      results.push(...context.validation.validateBatchTargets(options.planFile, cwd));
     }
 
     const report = context.validation.buildReport(results, {
