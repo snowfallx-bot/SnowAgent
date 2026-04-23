@@ -120,21 +120,35 @@ function parseDoctorEntry(filePath: string, data: Record<string, unknown>): Arti
 }
 
 function parseStatusEntry(filePath: string, data: Record<string, unknown>): ArtifactHistoryEntry {
+  const mode = getString(data.mode) ?? "snapshot";
   const summary = isPlainObject(data.summary) ? data.summary : {};
-  const status = getString(summary.status);
+  const status =
+    getString(summary.finalStatus) ??
+    getString(summary.status);
   const doctorStatus = getString(summary.doctorStatus);
   const retentionMatches =
-    typeof summary.retentionMatches === "number" ? summary.retentionMatches : 0;
+    typeof summary.retentionMatches === "number"
+      ? summary.retentionMatches
+      : typeof summary.retentionMatchedUnits === "number"
+        ? summary.retentionMatchedUnits
+        : 0;
   const failedRuns =
     typeof summary.failedRuns === "number" ? summary.failedRuns : 0;
   const failedBatches =
     typeof summary.failedBatches === "number" ? summary.failedBatches : 0;
+  const baselineStatus = getString(summary.baselineStatus);
+  const retentionExecuted = getBoolean(summary.retentionExecuted);
+  const reclaimedBytes =
+    typeof summary.reclaimedBytes === "number" ? summary.reclaimedBytes : 0;
 
   return {
     kind: "status",
     path: filePath,
     createdAt: getString(data.generatedAt) ?? toIsoFallback(filePath),
-    summary: `status status=${status ?? "unknown"} doctor=${doctorStatus ?? "unknown"} retentionMatches=${retentionMatches} failedRuns=${failedRuns} failedBatches=${failedBatches}`,
+    summary:
+      mode === "sweep"
+        ? `status sweep baseline=${baselineStatus ?? "unknown"} final=${status ?? "unknown"} retentionExecuted=${retentionExecuted ?? false} reclaimedBytes=${reclaimedBytes} failedRuns=${failedRuns} failedBatches=${failedBatches}`
+        : `status status=${status ?? "unknown"} doctor=${doctorStatus ?? "unknown"} retentionMatches=${retentionMatches} failedRuns=${failedRuns} failedBatches=${failedBatches}`,
     status
   };
 }

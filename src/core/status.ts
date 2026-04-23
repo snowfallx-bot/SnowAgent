@@ -75,6 +75,7 @@ export interface StatusOptions {
   agentNames?: AgentName[];
   timeoutMs?: number;
   failureLimit?: number;
+  persistReport?: boolean;
 }
 
 function sanitizePathToken(value: string): string {
@@ -239,7 +240,8 @@ export class StatusService {
       recommendedActions: dedupeActions(actions)
     };
 
-    const artifactPath = this.config.artifacts.saveOutputs
+    const artifactPath =
+      this.config.artifacts.saveOutputs && options.persistReport !== false
       ? path.resolve(
           options.cwd,
           this.config.artifacts.rootDir,

@@ -260,6 +260,38 @@ describe("ArtifactHistoryService", () => {
     expect(report.entries[0]?.status).toBe("healthy");
   });
 
+  it("parses sweep status entries", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "snowagent-history-sweep-"));
+    const config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+    const statusDir = path.join(tempDir, config.artifacts.rootDir, "status");
+
+    ensureDir(statusDir);
+    writeJsonFile(path.join(statusDir, "sweep-1.json"), {
+      mode: "sweep",
+      generatedAt: "2026-04-23T00:00:01.000Z",
+      summary: {
+        baselineStatus: "warning",
+        finalStatus: "healthy",
+        retentionExecuted: true,
+        reclaimedBytes: 2048,
+        failedRuns: 0,
+        failedBatches: 0
+      }
+    });
+
+    const history = new ArtifactHistoryService(config);
+    const report = history.list({
+      cwd: tempDir,
+      limit: 5,
+      kind: "status"
+    });
+
+    expect(report.totalEntries).toBe(1);
+    expect(report.entries[0]?.kind).toBe("status");
+    expect(report.entries[0]?.status).toBe("healthy");
+    expect(report.entries[0]?.summary).toContain("sweep");
+  });
+
   it("parses retention maintenance entries with dry-run status", () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "snowagent-history-retention-"));
     const config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
