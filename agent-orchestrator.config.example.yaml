@@ -12,6 +12,40 @@ artifacts:
   savePromptFiles: true
   saveLogs: true
 
+retention:
+  doctor:
+    enabled: true
+    olderThanDays: 30
+    keepLatest: 20
+  preview:
+    enabled: true
+    olderThanDays: 14
+    keepLatest: 20
+  preflight:
+    enabled: true
+    olderThanDays: 14
+    keepLatest: 30
+  run:
+    enabled: false
+    olderThanDays: 30
+    keepLatest: 30
+  batch:
+    enabled: true
+    olderThanDays: 30
+    keepLatest: 30
+  validation:
+    enabled: true
+    olderThanDays: 30
+    keepLatest: 30
+  maintenance:
+    enabled: true
+    olderThanDays: 30
+    keepLatest: 50
+  log:
+    enabled: true
+    olderThanDays: 7
+    keepLatest: 100
+
 routing:
   routes:
     summarize: [copilot, qwen, codex]

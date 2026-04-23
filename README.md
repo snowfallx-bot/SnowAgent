@@ -28,7 +28,7 @@
 - 规则路由与 fallback
 - 结构化输出解析：支持 JSON / JSON 数组 / JSONL / `===RESULT_JSON===` / Markdown JSON code block，并会继续尝试从事件 envelope 中提取最终结构化内容
 - YAML / JSON 配置与 `zod` 校验
-- 本地 CLI 入口：`list` / `config` / `detect` / `doctor` / `route` / `prompt` / `history` / `inspect` / `artifacts` / `prune-artifacts` / `export-task` / `preflight` / `validate` / `batch` / `retry` / `rerun` / `run`
+- 本地 CLI 入口：`list` / `config` / `detect` / `doctor` / `route` / `prompt` / `history` / `inspect` / `artifacts` / `prune-artifacts` / `retention` / `apply-retention` / `export-task` / `preflight` / `validate` / `batch` / `retry` / `rerun` / `run`
 - 基础单元测试，包含 `child_process.spawn` mock
 
 ## 目录结构
@@ -87,6 +87,8 @@ node .\dist\cli\index.js history --limit 10
 node .\dist\cli\index.js inspect --latest --kind run
 node .\dist\cli\index.js artifacts --json
 node .\dist\cli\index.js prune-artifacts --kind log --keep-latest 10
+node .\dist\cli\index.js retention
+node .\dist\cli\index.js apply-retention --kind log
 node .\dist\cli\index.js export-task --latest-run --output-file .\exports\latest-run.task.yaml
 node .\dist\cli\index.js validate --task-file .\demo\summarize.task.yaml
 node .\dist\cli\index.js batch --plan-file .\demo\demo.batch.yaml --dry-run --preflight
@@ -109,6 +111,8 @@ node ./dist/cli/index.js history --kind preview --json
 node ./dist/cli/index.js inspect --latest --kind batch --json
 node ./dist/cli/index.js artifacts --kind run --json
 node ./dist/cli/index.js prune-artifacts --kind preview --keep-latest 3 --json
+node ./dist/cli/index.js retention --json
+node ./dist/cli/index.js apply-retention --kind log --json
 node ./dist/cli/index.js export-task --latest-failed --output-file ./exports/latest-failed.task.json --format json
 node ./dist/cli/index.js validate --plan-file ./demo/demo.batch.yaml --json
 node ./dist/cli/index.js batch --plan-file ./demo/demo.batch.yaml --dry-run --preflight --json
@@ -160,6 +164,8 @@ node .\dist\cli\index.js history --kind preview --limit 5 --json
 node .\dist\cli\index.js inspect --latest --kind run --json
 node .\dist\cli\index.js artifacts --kind all --json
 node .\dist\cli\index.js prune-artifacts --kind run --keep-latest 5 --json
+node .\dist\cli\index.js retention --json
+node .\dist\cli\index.js apply-retention --json
 node .\dist\cli\index.js export-task --latest-run --output-file .\exports\rerun.task.yaml
 node .\dist\cli\index.js validate --task-file .\demo\summarize.task.yaml --plan-file .\demo\demo.batch.yaml --json
 node .\dist\cli\index.js batch --plan-file .\demo\demo.batch.yaml --dry-run --preflight --json
@@ -200,6 +206,26 @@ node .\dist\cli\index.js detect --config .\my-config.yaml
 核心配置项：
 
 ```yaml
+artifacts:
+  rootDir: artifacts
+  saveOutputs: true
+  savePromptFiles: true
+  saveLogs: true
+
+retention:
+  preview:
+    enabled: true
+    olderThanDays: 14
+    keepLatest: 20
+  run:
+    enabled: false
+    olderThanDays: 30
+    keepLatest: 30
+  log:
+    enabled: true
+    olderThanDays: 7
+    keepLatest: 100
+
 agents:
   codex:
     enabled: true
@@ -339,6 +365,7 @@ node .\dist\cli\index.js config --config .\my-config.yaml
 
 - 确认当前到底有没有读到本地配置文件
 - 查看每个 agent 的有效默认参数、输入模式和超时配置
+- 查看每类 artifact 的默认 retention 策略
 - 在修改 YAML/JSON 后快速核对 merge 结果
 
 ### `doctor`
@@ -418,7 +445,7 @@ node .\dist\cli\index.js history --kind run --task-id demo --limit 3
 这个命令适合：
 
 - 快速回看最近一次 smoke / preview / preflight / validation / maintenance / batch / run 发生了什么
-- 回看最近一次 artifact 盘点或清理做了什么
+- 回看最近一次 artifact 盘点、按规则清理或 retention 执行做了什么
 - 不手动翻目录，直接定位对应 artifact 路径
 - 在脚本里提取最近的 doctor / preview / preflight / validation / maintenance / batch / run 记录
 - 用 `--status` / `--task-id` / `--agent` 把列表快速缩到你关心的那一类记录
@@ -438,7 +465,7 @@ node .\dist\cli\index.js inspect --latest --kind run --status failed --agent cod
 这个命令适合：
 
 - 直接从最新 run / batch / preflight / doctor 结果里看详细上下文
-- 直接展开最新一次 artifact 盘点或清理报告
+- 直接展开最新一次 artifact 盘点、清理或 retention 报告
 - 不自己打开 JSON 文件，也能快速知道 artifact 里有没有 task snapshot
 - 配合 `history` 先看列表，再用 `inspect` 展开第 N 条
 - 先用过滤条件锁定某个失败 run，再直接展开那一条 artifact
@@ -506,6 +533,45 @@ node .\dist\cli\index.js prune-artifacts --kind log --keep-latest 20 --fail-on-m
 - `batch` 清理时会连同对应的 `retry-*.yaml` 一起处理
 - `export` 和 `other` 只会出现在 `artifacts` 总览里，不会被 `prune-artifacts` 直接误删
 - 每次 `prune-artifacts` 也会把计划或执行结果保存到 `artifacts/maintenance/*.json`，方便后续审计和回看
+
+### `retention`
+
+查看当前配置里的 retention 策略，不真正删除任何产物。
+
+```powershell
+node .\dist\cli\index.js retention
+node .\dist\cli\index.js retention --kind log --json
+```
+
+这个命令适合：
+
+- 快速确认默认或自定义配置到底会如何保留 `doctor` / `preview` / `preflight` / `run` / `batch` / `validation` / `maintenance` / `log`
+- 在真正清理前，看某一类策略是否启用、保留条数和天数是不是符合预期
+- 配合 `config` 一起排查为什么某些 artifact 一直被保留或一直被清掉
+
+### `apply-retention`
+
+按配置里的 retention 策略统一执行保留规则。默认也是 dry-run，只有显式加 `--apply` 才会真的删除。
+
+```powershell
+node .\dist\cli\index.js apply-retention
+node .\dist\cli\index.js apply-retention --kind log --json
+node .\dist\cli\index.js apply-retention --kind preview --apply
+node .\dist\cli\index.js apply-retention --fail-on-match --json
+```
+
+这个命令适合：
+
+- 把“保留策略”从临时命令参数提升成配置驱动的日常维护动作
+- 在无人值守脚本里定期执行一次统一清理，而不是为每类 artifact 分别写 `prune-artifacts`
+- 用 `--kind` 先单独演练某一类策略，再逐步扩大到全量 maintenance
+- 用 `--fail-on-match` 把“当前有可清理垃圾”直接转换成退出码，方便巡检
+
+说明：
+
+- `apply-retention` 会把所有策略的执行结果聚合成一份 `mode=retention` 的 maintenance 报告，落到 `artifacts/maintenance/*.json`
+- 内部每条策略虽然复用了 `prune-artifacts` 的逻辑，但不会额外散落一堆单独 prune 报告
+- 这些 retention 报告同样可以通过 `history --kind maintenance` 和 `inspect --latest --kind maintenance` 回看
 
 ### `preflight`
 
@@ -683,6 +749,7 @@ PromptBuilder 会要求 agent 输出：
 - `doctor/*.json`
 - `preflight/*.json`
 - `validation/*.json`
+- `maintenance/*.json`
 - `previews/*.json`
 - `previews/*.txt`
 - `batches/*.json`
