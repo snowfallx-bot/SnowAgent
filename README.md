@@ -28,7 +28,7 @@
 - 规则路由与 fallback
 - 结构化输出解析：支持 JSON / JSON 数组 / JSONL / `===RESULT_JSON===` / Markdown JSON code block，并会继续尝试从事件 envelope 中提取最终结构化内容
 - YAML / JSON 配置与 `zod` 校验
-- 本地 CLI 入口：`list` / `config` / `detect` / `doctor` / `route` / `prompt` / `preflight` / `history` / `validate` / `batch` / `retry` / `rerun` / `run`
+- 本地 CLI 入口：`list` / `config` / `detect` / `doctor` / `route` / `prompt` / `history` / `inspect` / `export-task` / `preflight` / `validate` / `batch` / `retry` / `rerun` / `run`
 - 基础单元测试，包含 `child_process.spawn` mock
 
 ## 目录结构
@@ -84,6 +84,8 @@ node .\dist\cli\index.js route --task fix --cwd . --detect
 node .\dist\cli\index.js prompt --task summarize --input-file .\demo\issue.txt --cwd .
 node .\dist\cli\index.js preflight --task-file .\demo\summarize.task.yaml
 node .\dist\cli\index.js history --limit 10
+node .\dist\cli\index.js inspect --latest --kind run
+node .\dist\cli\index.js export-task --latest-run --output-file .\exports\latest-run.task.yaml
 node .\dist\cli\index.js validate --task-file .\demo\summarize.task.yaml
 node .\dist\cli\index.js batch --plan-file .\demo\demo.batch.yaml --dry-run --preflight
 node .\dist\cli\index.js retry --latest-failed --dry-run
@@ -102,6 +104,8 @@ node ./dist/cli/index.js route --task review --cwd . --json
 node ./dist/cli/index.js prompt --task summarize --input-file ./demo/issue.txt --cwd . --json
 node ./dist/cli/index.js preflight --plan-file ./demo/demo.batch.yaml --json
 node ./dist/cli/index.js history --kind preview --json
+node ./dist/cli/index.js inspect --latest --kind batch --json
+node ./dist/cli/index.js export-task --latest-failed --output-file ./exports/latest-failed.task.json --format json
 node ./dist/cli/index.js validate --plan-file ./demo/demo.batch.yaml --json
 node ./dist/cli/index.js batch --plan-file ./demo/demo.batch.yaml --dry-run --preflight --json
 node ./dist/cli/index.js retry --latest-failed --dry-run --preflight --json
@@ -149,6 +153,8 @@ node .\dist\cli\index.js route --task review --agent codex --cwd . --detect --js
 node .\dist\cli\index.js prompt --task summarize --input-file .\demo\issue.txt --cwd . --json
 node .\dist\cli\index.js preflight --task-file .\demo\review.task.yaml --json
 node .\dist\cli\index.js history --kind preview --limit 5 --json
+node .\dist\cli\index.js inspect --latest --kind run --json
+node .\dist\cli\index.js export-task --latest-run --output-file .\exports\rerun.task.yaml
 node .\dist\cli\index.js validate --task-file .\demo\summarize.task.yaml --plan-file .\demo\demo.batch.yaml --json
 node .\dist\cli\index.js batch --plan-file .\demo\demo.batch.yaml --dry-run --preflight --json
 node .\dist\cli\index.js retry --report-file .\artifacts\batches\batch-demo.batch-123.json --dry-run --preflight --json
@@ -406,6 +412,38 @@ node .\dist\cli\index.js history --kind run --limit 10
 - 不手动翻目录，直接定位对应 artifact 路径
 - 在脚本里提取最近的 doctor / preview / preflight / validation / batch / run 记录
 
+### `inspect`
+
+直接查看某一个 artifact，或者按历史顺序选择最近一条记录做展开检查。
+
+```powershell
+node .\dist\cli\index.js inspect --artifact .\artifacts\some-task\orchestration-result.json
+node .\dist\cli\index.js inspect --latest --kind run --json
+node .\dist\cli\index.js inspect --latest --kind batch --index 2
+```
+
+这个命令适合：
+
+- 直接从最新 run / batch / preflight / doctor 结果里看详细上下文
+- 不自己打开 JSON 文件，也能快速知道 artifact 里有没有 task snapshot
+- 配合 `history` 先看列表，再用 `inspect` 展开第 N 条
+
+### `export-task`
+
+从 `run` artifact 中提取 task snapshot，重新导出成一个可复用的 task-file。
+
+```powershell
+node .\dist\cli\index.js export-task --run-artifact .\artifacts\some-task\orchestration-result.json --output-file .\exports\task.yaml
+node .\dist\cli\index.js export-task --latest-run --output-file .\exports\latest-run.task.yaml
+node .\dist\cli\index.js export-task --latest-failed --output-file .\exports\latest-failed.task.json --format json --strip-id
+```
+
+这个命令适合：
+
+- 把一次历史 `run` 重新沉淀成 task-file，纳入 `batch` 计划
+- 在 `rerun` 之外，再保留一份可编辑、可版本化的任务快照
+- 用 `--strip-id` 导出一个“下一次执行自动分配新 taskId”的模板
+
 ### `preflight`
 
 把输入校验和路由可用性检查合成一份“执行前体检”报告，适合在真正 `run` / `batch` / `retry` 前先看一次。
@@ -511,6 +549,7 @@ node .\dist\cli\index.js rerun --latest-failed --dry-run --preflight
 说明：
 
 - `rerun` 依赖较新的 `orchestration-result.json` 中包含 task snapshot；很早之前生成的旧 artifact 如果没有这部分内容，会提示你先重新跑一次新的 `run`
+- 如果你不只是想“再跑一次”，而是想把这份历史任务另存为 task-file，可以改用 `export-task`
 
 ### `run`
 
