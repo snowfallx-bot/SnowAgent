@@ -28,7 +28,7 @@
 - 规则路由与 fallback
 - 结构化输出解析：支持 JSON / JSON 数组 / JSONL / `===RESULT_JSON===` / Markdown JSON code block，并会继续尝试从事件 envelope 中提取最终结构化内容
 - YAML / JSON 配置与 `zod` 校验
-- 本地 CLI 入口：`list` / `config` / `detect` / `doctor` / `status` / `route` / `prompt` / `history` / `inspect` / `artifacts` / `prune-artifacts` / `retention` / `apply-retention` / `export-task` / `preflight` / `validate` / `batch` / `retry` / `rerun` / `run`
+- 本地 CLI 入口：`list` / `config` / `detect` / `doctor` / `status` / `sweep` / `route` / `prompt` / `history` / `inspect` / `artifacts` / `prune-artifacts` / `retention` / `apply-retention` / `export-task` / `preflight` / `validate` / `batch` / `retry` / `rerun` / `run`
 - 基础单元测试，包含 `child_process.spawn` mock
 
 ## 目录结构
@@ -81,6 +81,7 @@ node .\dist\cli\index.js config --agent codex
 node .\dist\cli\index.js detect
 node .\dist\cli\index.js doctor
 node .\dist\cli\index.js status
+node .\dist\cli\index.js sweep --apply-retention
 node .\dist\cli\index.js route --task fix --cwd . --detect
 node .\dist\cli\index.js prompt --task summarize --input-file .\demo\issue.txt --cwd .
 node .\dist\cli\index.js preflight --task-file .\demo\summarize.task.yaml
@@ -106,6 +107,7 @@ node ./dist/cli/index.js config --json
 node ./dist/cli/index.js detect
 node ./dist/cli/index.js doctor --json
 node ./dist/cli/index.js status --json
+node ./dist/cli/index.js sweep --apply-retention --json
 node ./dist/cli/index.js route --task review --cwd . --json
 node ./dist/cli/index.js prompt --task summarize --input-file ./demo/issue.txt --cwd . --json
 node ./dist/cli/index.js preflight --plan-file ./demo/demo.batch.yaml --json
@@ -159,6 +161,7 @@ node .\dist\cli\index.js doctor --json
 node .\dist\cli\index.js doctor --agent copilot --smoke --json
 node .\dist\cli\index.js doctor --agent qwen --smoke --fail-on-unhealthy
 node .\dist\cli\index.js status --json
+node .\dist\cli\index.js sweep --apply-retention --json
 node .\dist\cli\index.js config --agent copilot --json
 node .\dist\cli\index.js route --task review --agent codex --cwd . --detect --json
 node .\dist\cli\index.js prompt --task summarize --input-file .\demo\issue.txt --cwd . --json
@@ -421,6 +424,29 @@ node .\dist\cli\index.js status --agent codex --smoke --json
 
 - `status` 内部会静默复用 doctor、artifact 盘点和 retention 预览逻辑，但不会额外生成一堆 doctor / maintenance 子报告
 - 生成的 `status` 报告可以直接通过 `history --kind status` 和 `inspect --latest --kind status` 回看
+
+### `sweep`
+
+运行一轮运维 sweep：先抓 baseline status，再按需执行 retention，最后再抓一份 final status，适合当成定时维护入口。
+
+```powershell
+node .\dist\cli\index.js sweep
+node .\dist\cli\index.js sweep --apply-retention --json
+node .\dist\cli\index.js sweep --apply-retention --fail-on-warning
+node .\dist\cli\index.js sweep --agent codex --smoke --json
+```
+
+这个命令适合：
+
+- 想把“看状态”和“做基础清理”合成一个无人值守步骤
+- 在定时任务里先做 baseline/final 对比，再决定是否需要人工介入
+- 结合 `--fail-on-warning` 或 `--fail-on-unhealthy`，把最终 sweep 结果直接变成脚本退出码
+
+说明：
+
+- 不加 `--apply-retention` 时，`sweep` 只会做 baseline/final 两次状态快照，不会真正删除任何 artifact
+- 加上 `--apply-retention` 后，只有 baseline 里真的发现 retention 命中时才会执行清理
+- `sweep` 会把聚合报告保存到 `artifacts/status/*.json`，并可继续通过 `history --kind status` / `inspect --latest --kind status` 回看
 
 ### `route`
 
