@@ -16,6 +16,7 @@ import { Doctor } from "../core/doctor";
 import { ArtifactHistoryService, HISTORY_KINDS } from "../core/history";
 import {
   BatchPreflightReport,
+  PreflightStatus,
   PreflightService,
   TaskPreflightReport
 } from "../core/preflight";
@@ -235,6 +236,37 @@ function printBatchPreflightReport(report: BatchPreflightReport): void {
     for (const reason of task.reasons) {
       console.log(`  reason: ${reason}`);
     }
+  }
+}
+
+function shouldStopForPreflight(
+  status: PreflightStatus,
+  failOnWarning: boolean
+): boolean {
+  return status === "blocked" || (failOnWarning && status === "warning");
+}
+
+function printPreflightSummary(
+  report: TaskPreflightReport | BatchPreflightReport
+): void {
+  console.log(`preflightStatus: ${report.status}`);
+  if (report.artifactPath) {
+    console.log(`preflightArtifactPath: ${report.artifactPath}`);
+  }
+
+  if (report.mode === "task") {
+    console.log(
+      `preflightRoute: ${report.route.orderedAgents.join(" -> ") || "(none)"}`
+    );
+    console.log(`preflightAvailableAgents: ${report.availableAgents}`);
+  } else {
+    console.log(
+      `preflightSummary: ready=${report.summary.readyTasks} warning=${report.summary.warningTasks} blocked=${report.summary.blockedTasks} total=${report.summary.totalTasks}`
+    );
+  }
+
+  for (const reason of report.reasons) {
+    console.log(`preflightReason: ${reason}`);
   }
 }
 
@@ -906,6 +938,15 @@ program
   .requiredOption("--plan-file <path>", "Path to a JSON/YAML batch plan file.")
   .option("--cwd <path>", "Base working directory.", process.cwd())
   .option("--dry-run", "Build commands and orchestration flow without launching agent processes.")
+  .option("--preflight", "Run preflight before batch execution and stop on blocked status.")
+  .option(
+    "--skip-preflight-detect",
+    "When using --preflight, skip live agent detection and only inspect config/routing."
+  )
+  .option(
+    "--fail-on-preflight-warning",
+    "When using --preflight, also stop when preflight status is warning."
+  )
   .option("--fail-on-error", "Exit with code 1 if any task in the batch fails.")
   .option("-c, --config <path>", "Path to a JSON/YAML config file.")
   .option("--json", "Print JSON output.")
@@ -913,6 +954,9 @@ program
     planFile: string;
     cwd: string;
     dryRun?: boolean;
+    preflight?: boolean;
+    skipPreflightDetect?: boolean;
+    failOnPreflightWarning?: boolean;
     failOnError?: boolean;
     config?: string;
     json?: boolean;
@@ -920,19 +964,50 @@ program
     const cwd = path.resolve(options.cwd);
     const context = createContext(options.config, cwd, Boolean(options.json));
     const plan = loadBatchPlan(options.planFile, cwd);
+    const preflight = options.preflight
+      ? await context.preflight.inspectBatch(plan, {
+          includeDetection: !options.skipPreflightDetect,
+          artifactCwd: cwd
+        })
+      : undefined;
+
+    if (preflight && shouldStopForPreflight(preflight.status, Boolean(options.failOnPreflightWarning))) {
+      const output = {
+        preflight,
+        skipped: true,
+        skipReason:
+          preflight.status === "blocked"
+            ? "Batch execution was skipped because preflight status is blocked."
+            : "Batch execution was skipped because preflight status is warning and fail-on-preflight-warning is enabled."
+      };
+
+      if (options.json) {
+        printJson(output);
+      } else {
+        printPreflightSummary(preflight);
+        console.log(`skipReason: ${output.skipReason}`);
+      }
+
+      process.exitCode = 1;
+      return;
+    }
+
     const report = await context.batch.runPlan(plan, {
       dryRun: Boolean(options.dryRun),
       artifactCwd: cwd
     });
 
     if (options.json) {
-      printJson(report);
+      printJson(preflight ? { preflight, report } : report);
       if (options.failOnError && report.failedTasks > 0) {
         process.exitCode = 1;
       }
       return;
     }
 
+    if (preflight) {
+      printPreflightSummary(preflight);
+    }
     printBatchRunReport(report);
 
     if (options.failOnError && report.failedTasks > 0) {
@@ -948,6 +1023,15 @@ program
   .option("--latest-failed", "Use the most recent failed batch report from artifacts/.")
   .option("--cwd <path>", "Base working directory.", process.cwd())
   .option("--dry-run", "Build commands and orchestration flow without launching agent processes.")
+  .option("--preflight", "Run preflight before retry execution and stop on blocked status.")
+  .option(
+    "--skip-preflight-detect",
+    "When using --preflight, skip live agent detection and only inspect config/routing."
+  )
+  .option(
+    "--fail-on-preflight-warning",
+    "When using --preflight, also stop when preflight status is warning."
+  )
   .option("--fail-on-error", "Exit with code 1 if any task in the retry batch fails.")
   .option("-c, --config <path>", "Path to a JSON/YAML config file.")
   .option("--json", "Print JSON output.")
@@ -957,6 +1041,9 @@ program
     latestFailed?: boolean;
     cwd: string;
     dryRun?: boolean;
+    preflight?: boolean;
+    skipPreflightDetect?: boolean;
+    failOnPreflightWarning?: boolean;
     failOnError?: boolean;
     config?: string;
     json?: boolean;
@@ -972,15 +1059,51 @@ program
       );
     }
 
-    const resolution = options.retryPlan
-      ? {
-          retryPlanPath: path.resolve(cwd, options.retryPlan),
-          source: "retry_plan" as const
-        }
-      : options.reportFile
-        ? resolveRetryPlanFromBatchReport(options.reportFile, cwd)
-        : resolveLatestFailedRetryPlan(context.config, cwd);
+      const resolution = options.retryPlan
+        ? {
+            retryPlanPath: path.resolve(cwd, options.retryPlan),
+            source: "retry_plan" as const
+          }
+        : options.reportFile
+          ? resolveRetryPlanFromBatchReport(options.reportFile, cwd)
+          : resolveLatestFailedRetryPlan(context.config, cwd);
     const plan = loadBatchPlan(resolution.retryPlanPath, cwd);
+    const preflight = options.preflight
+      ? await context.preflight.inspectBatch(plan, {
+          includeDetection: !options.skipPreflightDetect,
+          artifactCwd: cwd
+        })
+      : undefined;
+
+    if (preflight && shouldStopForPreflight(preflight.status, Boolean(options.failOnPreflightWarning))) {
+      const output = {
+        source: resolution.source,
+        sourceReportPath: "sourceReportPath" in resolution ? resolution.sourceReportPath : undefined,
+        retryPlanPath: resolution.retryPlanPath,
+        preflight,
+        skipped: true,
+        skipReason:
+          preflight.status === "blocked"
+            ? "Retry execution was skipped because preflight status is blocked."
+            : "Retry execution was skipped because preflight status is warning and fail-on-preflight-warning is enabled."
+      };
+
+      if (options.json) {
+        printJson(output);
+      } else {
+        console.log(`source: ${output.source}`);
+        if (output.sourceReportPath) {
+          console.log(`sourceReportPath: ${output.sourceReportPath}`);
+        }
+        console.log(`retryPlanPath: ${output.retryPlanPath}`);
+        printPreflightSummary(preflight);
+        console.log(`skipReason: ${output.skipReason}`);
+      }
+
+      process.exitCode = 1;
+      return;
+    }
+
     const report = await context.batch.runPlan(plan, {
       dryRun: Boolean(options.dryRun),
       artifactCwd: cwd
@@ -989,6 +1112,7 @@ program
       source: resolution.source,
       sourceReportPath: "sourceReportPath" in resolution ? resolution.sourceReportPath : undefined,
       retryPlanPath: resolution.retryPlanPath,
+      preflight,
       report
     };
 
@@ -1005,6 +1129,9 @@ program
       console.log(`sourceReportPath: ${output.sourceReportPath}`);
     }
     console.log(`retryPlanPath: ${output.retryPlanPath}`);
+    if (preflight) {
+      printPreflightSummary(preflight);
+    }
     printBatchRunReport(report);
 
     if (options.failOnError && report.failedTasks > 0) {
@@ -1027,6 +1154,15 @@ program
   .option("-c, --config <path>", "Path to a JSON/YAML config file.")
   .option("--json", "Print JSON output.")
   .option("--dry-run", "Build route and commands without launching the agent process.")
+  .option("--preflight", "Run preflight before task execution and stop on blocked status.")
+  .option(
+    "--skip-preflight-detect",
+    "When using --preflight, skip live agent detection and only inspect config/routing."
+  )
+  .option(
+    "--fail-on-preflight-warning",
+    "When using --preflight, also stop when preflight status is warning."
+  )
   .action(
     async (options: {
       task: string;
@@ -1041,6 +1177,9 @@ program
       config?: string;
       json?: boolean;
       dryRun?: boolean;
+      preflight?: boolean;
+      skipPreflightDetect?: boolean;
+      failOnPreflightWarning?: boolean;
     }) => {
       const cwd = path.resolve(options.cwd ?? process.cwd());
       const context = createContext(options.config, cwd, Boolean(options.json));
@@ -1056,16 +1195,47 @@ program
         inputFile: options.inputFile,
         requirePrompt: true
       });
+      const preflight = options.preflight
+        ? await context.preflight.inspectTask(task, {
+            taskFilePath,
+            includeDetection: !options.skipPreflightDetect,
+            artifactCwd: cwd
+          })
+        : undefined;
+
+      if (preflight && shouldStopForPreflight(preflight.status, Boolean(options.failOnPreflightWarning))) {
+        const output = {
+          preflight,
+          skipped: true,
+          skipReason:
+            preflight.status === "blocked"
+              ? "Task execution was skipped because preflight status is blocked."
+              : "Task execution was skipped because preflight status is warning and fail-on-preflight-warning is enabled."
+        };
+
+        if (options.json) {
+          printJson(output);
+        } else {
+          printPreflightSummary(preflight);
+          console.log(`skipReason: ${output.skipReason}`);
+        }
+
+        process.exitCode = 1;
+        return;
+      }
 
       const result = await context.orchestrator.run(task, {
         dryRun: Boolean(options.dryRun)
       });
 
       if (options.json) {
-        printJson(result);
+        printJson(preflight ? { preflight, result } : result);
         return;
       }
 
+      if (preflight) {
+        printPreflightSummary(preflight);
+      }
       console.log(`taskId: ${result.taskId}`);
       console.log(`success: ${result.success}`);
       console.log(`selectedAgent: ${result.selectedAgent ?? "none"}`);
