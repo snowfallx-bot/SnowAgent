@@ -4,7 +4,7 @@ import path from "node:path";
 import { AppConfig } from "../config/schema";
 import { pathExists, readTextFile } from "../utils/fs";
 
-export const HISTORY_KINDS = ["doctor", "preview", "preflight", "run", "batch", "validation", "all"] as const;
+export const HISTORY_KINDS = ["doctor", "preview", "preflight", "run", "batch", "validation", "maintenance", "all"] as const;
 export type ArtifactHistoryFilter = (typeof HISTORY_KINDS)[number];
 export type ArtifactHistoryKind =
   | "doctor"
@@ -13,7 +13,8 @@ export type ArtifactHistoryKind =
   | "preflight"
   | "run"
   | "batch"
-  | "validation";
+  | "validation"
+  | "maintenance";
 
 export interface ArtifactHistoryEntry {
   kind: ArtifactHistoryKind;
@@ -243,6 +244,40 @@ function parsePreflightEntry(
   };
 }
 
+function parseMaintenanceEntry(
+  filePath: string,
+  data: Record<string, unknown>
+): ArtifactHistoryEntry {
+  const mode = getString(data.mode) ?? "unknown";
+  const filter = getString(data.filter) ?? "all";
+  const dryRun = getBoolean(data.dryRun);
+  const matchedUnitCount =
+    typeof data.matchedUnitCount === "number" ? data.matchedUnitCount : undefined;
+  const reclaimableBytes =
+    typeof data.reclaimableBytes === "number" ? data.reclaimableBytes : undefined;
+  const matchedSizeBytes =
+    typeof data.matchedSizeBytes === "number" ? data.matchedSizeBytes : undefined;
+  const status =
+    mode === "prune"
+      ? dryRun === true
+        ? "dry_run"
+        : dryRun === false
+          ? "applied"
+          : undefined
+      : "inventory";
+
+  return {
+    kind: "maintenance",
+    path: filePath,
+    createdAt: getString(data.generatedAt) ?? toIsoFallback(filePath),
+    summary:
+      mode === "prune"
+        ? `maintenance prune filter=${filter} units=${matchedUnitCount ?? 0} reclaimableBytes=${reclaimableBytes ?? 0}`
+        : `maintenance inventory filter=${filter} units=${matchedUnitCount ?? 0} sizeBytes=${matchedSizeBytes ?? 0}`,
+    status
+  };
+}
+
 export function classifyArtifactPath(
   filePath: string
 ): ArtifactHistoryKind | undefined {
@@ -268,6 +303,10 @@ export function classifyArtifactPath(
 
   if (normalized.includes("/validation/") && normalized.endsWith(".json")) {
     return "validation";
+  }
+
+  if (normalized.includes("/maintenance/") && normalized.endsWith(".json")) {
+    return "maintenance";
   }
 
   if (path.basename(filePath) === "orchestration-result.json") {
@@ -344,6 +383,8 @@ export class ArtifactHistoryService {
                   ? parseBatchEntry(filePath, data)
                   : kind === "validation"
                     ? parseValidationEntry(filePath, data)
+                    : kind === "maintenance"
+                      ? parseMaintenanceEntry(filePath, data)
                     : parseRunEntry(filePath, data);
 
       if (matchesEntryFilters(entry, options)) {

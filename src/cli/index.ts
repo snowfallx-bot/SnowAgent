@@ -383,6 +383,9 @@ function printArtifactInventoryReport(report: ArtifactInventoryReport): void {
   const formatSize = (value: number) => `${value} (${formatByteSize(value)})`;
   console.log(`rootDir: ${report.rootDir}`);
   console.log(`filter: ${report.filter}`);
+  if (report.artifactPath) {
+    console.log(`artifactPath: ${report.artifactPath}`);
+  }
   if (report.filters.status) {
     console.log(`statusFilter: ${report.filters.status}`);
   }
@@ -414,6 +417,9 @@ function printArtifactPruneReport(report: ArtifactPruneReport): void {
   console.log(`rootDir: ${report.rootDir}`);
   console.log(`filter: ${report.filter}`);
   console.log(`dryRun: ${report.dryRun}`);
+  if (report.artifactPath) {
+    console.log(`artifactPath: ${report.artifactPath}`);
+  }
   if (report.filters.status) {
     console.log(`statusFilter: ${report.filters.status}`);
   }

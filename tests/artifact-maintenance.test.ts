@@ -68,6 +68,8 @@ describe("ArtifactMaintenanceService", () => {
       kind: "all"
     });
 
+    expect(report.mode).toBe("inventory");
+    expect(report.artifactPath && fs.existsSync(report.artifactPath)).toBe(true);
     expect(report.totalRootFileCount).toBe(11);
     expect(report.kinds.find((item) => item.kind === "doctor")?.unitCount).toBe(1);
     expect(report.kinds.find((item) => item.kind === "preview")?.fileCount).toBe(2);
@@ -107,7 +109,9 @@ describe("ArtifactMaintenanceService", () => {
       keepLatest: 1
     });
 
+    expect(dryRun.mode).toBe("prune");
     expect(dryRun.dryRun).toBe(true);
+    expect(dryRun.artifactPath && fs.existsSync(dryRun.artifactPath)).toBe(true);
     expect(dryRun.matchedUnitCount).toBe(1);
     expect(dryRun.candidates[0]?.primaryPath).toContain("session-1.log");
     expect(fs.existsSync(path.join(artifactsRoot, "session-1.log"))).toBe(true);

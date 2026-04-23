@@ -131,4 +131,31 @@ describe("ArtifactInspector", () => {
     expect(report.historyFilters?.selectedAgent).toBe("codex");
     expect(report.taskSnapshot?.type).toBe("fix");
   });
+
+  it("inspects the latest maintenance artifact", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "snowagent-inspect-maintenance-"));
+    const config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+    const maintenanceDir = path.join(tempDir, config.artifacts.rootDir, "maintenance");
+
+    ensureDir(maintenanceDir);
+    writeJsonFile(path.join(maintenanceDir, "inventory-1.json"), {
+      generatedAt: "2026-04-23T00:00:05.000Z",
+      mode: "inventory",
+      filter: "all",
+      matchedUnitCount: 3,
+      matchedSizeBytes: 4096
+    });
+
+    const inspector = new ArtifactInspector(config);
+    const report = inspector.inspect({
+      cwd: tempDir,
+      latest: true,
+      kind: "maintenance"
+    });
+
+    expect(report.kind).toBe("maintenance");
+    expect(report.entry?.status).toBe("inventory");
+    expect(report.topLevelKeys).toContain("mode");
+    expect(report.taskSnapshot).toBeUndefined();
+  });
 });

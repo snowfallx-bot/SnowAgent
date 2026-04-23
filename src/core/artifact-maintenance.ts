@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { AppConfig } from "../config/schema";
-import { pathExists, readTextFile } from "../utils/fs";
+import { pathExists, readTextFile, writeJsonFile } from "../utils/fs";
 import { ArtifactHistoryEntry, ArtifactHistoryFilter, ArtifactHistoryService } from "./history";
 
 export const ARTIFACT_FILTER_KINDS = [
@@ -12,6 +12,7 @@ export const ARTIFACT_FILTER_KINDS = [
   "run",
   "batch",
   "validation",
+  "maintenance",
   "log",
   "export",
   "other",
@@ -26,6 +27,7 @@ export const PRUNABLE_ARTIFACT_KINDS = [
   "run",
   "batch",
   "validation",
+  "maintenance",
   "log",
   "all"
 ] as const;
@@ -57,6 +59,7 @@ export interface ArtifactInventoryKindSummary {
 }
 
 export interface ArtifactInventoryReport {
+  mode: "inventory";
   generatedAt: string;
   rootDir: string;
   filter: ArtifactFilterKind;
@@ -71,6 +74,7 @@ export interface ArtifactInventoryReport {
   matchedFileCount: number;
   matchedSizeBytes: number;
   kinds: ArtifactInventoryKindSummary[];
+  artifactPath?: string;
 }
 
 export interface ArtifactInventoryOptions {
@@ -95,6 +99,7 @@ export interface ArtifactPruneCandidate {
 }
 
 export interface ArtifactPruneReport {
+  mode: "prune";
   generatedAt: string;
   rootDir: string;
   dryRun: boolean;
@@ -112,6 +117,7 @@ export interface ArtifactPruneReport {
   matchedFileCount: number;
   reclaimableBytes: number;
   candidates: ArtifactPruneCandidate[];
+  artifactPath?: string;
 }
 
 export interface ArtifactPruneOptions {
@@ -193,6 +199,10 @@ function mapHistoryKindToArtifactKind(entry: ArtifactHistoryEntry): ArtifactMana
   }
 
   return entry.kind;
+}
+
+function sanitizePathToken(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._-]/gu, "-");
 }
 
 function tryReadBatchRetryPlanPath(filePath: string): string | undefined {
@@ -306,6 +316,7 @@ function toHistoryFilter(kind: ArtifactFilterKind): ArtifactHistoryFilter {
     kind === "run" ||
     kind === "batch" ||
     kind === "validation" ||
+    kind === "maintenance" ||
     kind === "all"
   ) {
     return kind;
@@ -372,6 +383,23 @@ export class ArtifactMaintenanceService {
     return walkFiles(rootDir)
       .filter((filePath) => isLogFile(filePath, rootDir))
       .map((filePath) => createFileUnit("log", filePath));
+  }
+
+  private resolveReportPath(
+    cwd: string,
+    mode: "inventory" | "prune",
+    filter: ArtifactFilterKind | PrunableArtifactKind
+  ): string | undefined {
+    if (!this.config.artifacts.saveOutputs) {
+      return undefined;
+    }
+
+    return path.resolve(
+      cwd,
+      this.config.artifacts.rootDir,
+      "maintenance",
+      `${mode}-${sanitizePathToken(filter)}-${Date.now()}.json`
+    );
   }
 
   private collectExtraUnits(
@@ -451,7 +479,8 @@ export class ArtifactMaintenanceService {
         )
       );
 
-    return {
+    const report: ArtifactInventoryReport = {
+      mode: "inventory",
       generatedAt: new Date().toISOString(),
       rootDir,
       filter,
@@ -467,6 +496,14 @@ export class ArtifactMaintenanceService {
       matchedSizeBytes: units.reduce((total, unit) => total + unit.sizeBytes, 0),
       kinds
     };
+
+    const artifactPath = this.resolveReportPath(options.cwd, "inventory", filter);
+    if (artifactPath) {
+      report.artifactPath = artifactPath;
+      writeJsonFile(artifactPath, report);
+    }
+
+    return report;
   }
 
   public prune(options: ArtifactPruneOptions): ArtifactPruneReport {
@@ -523,7 +560,8 @@ export class ArtifactMaintenanceService {
       }
     }
 
-    return {
+    const report: ArtifactPruneReport = {
+      mode: "prune",
       generatedAt: new Date().toISOString(),
       rootDir,
       dryRun: !options.apply,
@@ -553,5 +591,13 @@ export class ArtifactMaintenanceService {
         deletePaths: [...unit.deletePaths]
       }))
     };
+
+    const artifactPath = this.resolveReportPath(options.cwd, "prune", filter);
+    if (artifactPath) {
+      report.artifactPath = artifactPath;
+      writeJsonFile(artifactPath, report);
+    }
+
+    return report;
   }
 }
