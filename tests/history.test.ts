@@ -9,7 +9,7 @@ import { ArtifactHistoryService } from "../src/core/history";
 import { ensureDir, writeJsonFile } from "../src/utils/fs";
 
 describe("ArtifactHistoryService", () => {
-  it("lists recent doctor, preview, batch, and run artifacts", () => {
+  it("lists recent doctor, preview, validation, batch, and run artifacts", () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "snowagent-history-"));
     const config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
     const artifactsRoot = path.join(tempDir, config.artifacts.rootDir);
@@ -17,6 +17,7 @@ describe("ArtifactHistoryService", () => {
     ensureDir(path.join(artifactsRoot, "doctor"));
     ensureDir(path.join(artifactsRoot, "previews"));
     ensureDir(path.join(artifactsRoot, "batches"));
+    ensureDir(path.join(artifactsRoot, "validation"));
     ensureDir(path.join(artifactsRoot, "task-1"));
 
     writeJsonFile(path.join(artifactsRoot, "doctor", "doctor-1.json"), {
@@ -53,6 +54,14 @@ describe("ArtifactHistoryService", () => {
       totalTasks: 2,
       stoppedEarly: false
     });
+    writeJsonFile(path.join(artifactsRoot, "validation", "validate-1.json"), {
+      generatedAt: "2026-04-23T00:00:06.000Z",
+      allValid: false,
+      results: [
+        { kind: "config", valid: true, summary: "Config file is valid." },
+        { kind: "task", valid: false, summary: "Task file validation failed." }
+      ]
+    });
     writeJsonFile(path.join(artifactsRoot, "task-1", "orchestration-result.json"), {
       completedAt: "2026-04-23T00:00:01.000Z",
       taskId: "run-1",
@@ -70,12 +79,13 @@ describe("ArtifactHistoryService", () => {
       kind: "all"
     });
 
-    expect(report.totalEntries).toBe(5);
-    expect(report.entries[0]?.kind).toBe("batch");
-    expect(report.entries[1]?.kind).toBe("prompt_preview");
-    expect(report.entries[2]?.kind).toBe("doctor");
-    expect(report.entries[3]?.kind).toBe("route_preview");
-    expect(report.entries[4]?.kind).toBe("run");
+    expect(report.totalEntries).toBe(6);
+    expect(report.entries[0]?.kind).toBe("validation");
+    expect(report.entries[1]?.kind).toBe("batch");
+    expect(report.entries[2]?.kind).toBe("prompt_preview");
+    expect(report.entries[3]?.kind).toBe("doctor");
+    expect(report.entries[4]?.kind).toBe("route_preview");
+    expect(report.entries[5]?.kind).toBe("run");
   });
 
   it("filters preview entries and respects the limit", () => {
@@ -131,5 +141,32 @@ describe("ArtifactHistoryService", () => {
     expect(report.totalEntries).toBe(1);
     expect(report.entries[0]?.kind).toBe("batch");
     expect(report.entries[0]?.status).toBe("failed");
+  });
+
+  it("filters validation entries", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "snowagent-history-validation-"));
+    const config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+    const validationDir = path.join(tempDir, config.artifacts.rootDir, "validation");
+
+    ensureDir(validationDir);
+    writeJsonFile(path.join(validationDir, "validate-1.json"), {
+      generatedAt: "2026-04-23T00:00:01.000Z",
+      allValid: true,
+      results: [
+        { kind: "config", valid: true, summary: "Config file is valid." },
+        { kind: "task", valid: true, summary: "Task file is valid." }
+      ]
+    });
+
+    const history = new ArtifactHistoryService(config);
+    const report = history.list({
+      cwd: tempDir,
+      limit: 5,
+      kind: "validation"
+    });
+
+    expect(report.totalEntries).toBe(1);
+    expect(report.entries[0]?.kind).toBe("validation");
+    expect(report.entries[0]?.status).toBe("success");
   });
 });

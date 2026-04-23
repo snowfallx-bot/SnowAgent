@@ -4,14 +4,15 @@ import path from "node:path";
 import { AppConfig } from "../config/schema";
 import { pathExists, readTextFile } from "../utils/fs";
 
-export const HISTORY_KINDS = ["doctor", "preview", "run", "batch", "all"] as const;
+export const HISTORY_KINDS = ["doctor", "preview", "run", "batch", "validation", "all"] as const;
 export type ArtifactHistoryFilter = (typeof HISTORY_KINDS)[number];
 export type ArtifactHistoryKind =
   | "doctor"
   | "route_preview"
   | "prompt_preview"
   | "run"
-  | "batch";
+  | "batch"
+  | "validation";
 
 export interface ArtifactHistoryEntry {
   kind: ArtifactHistoryKind;
@@ -185,6 +186,27 @@ function parseBatchEntry(filePath: string, data: Record<string, unknown>): Artif
   };
 }
 
+function parseValidationEntry(
+  filePath: string,
+  data: Record<string, unknown>
+): ArtifactHistoryEntry {
+  const results = Array.isArray(data.results) ? data.results : [];
+  const validTargets = results.filter((item) => {
+    return isPlainObject(item) && item.valid === true;
+  }).length;
+  const invalidTargets = results.length - validTargets;
+  const allValid = getBoolean(data.allValid);
+
+  return {
+    kind: "validation",
+    path: filePath,
+    createdAt: getString(data.generatedAt) ?? toIsoFallback(filePath),
+    summary: `validation valid=${validTargets} invalid=${invalidTargets} total=${results.length}`,
+    status: allValid === undefined ? undefined : allValid ? "success" : "failed",
+    success: allValid
+  };
+}
+
 function classifyArtifact(filePath: string): ArtifactHistoryKind | undefined {
   const normalized = filePath.replace(/\\/g, "/");
 
@@ -200,6 +222,10 @@ function classifyArtifact(filePath: string): ArtifactHistoryKind | undefined {
 
   if (normalized.includes("/batches/") && normalized.endsWith(".json")) {
     return "batch";
+  }
+
+  if (normalized.includes("/validation/") && normalized.endsWith(".json")) {
+    return "validation";
   }
 
   if (path.basename(filePath) === "orchestration-result.json") {
@@ -261,6 +287,11 @@ export class ArtifactHistoryService {
 
       if (kind === "batch") {
         entries.push(parseBatchEntry(filePath, data));
+        continue;
+      }
+
+      if (kind === "validation") {
+        entries.push(parseValidationEntry(filePath, data));
         continue;
       }
 
