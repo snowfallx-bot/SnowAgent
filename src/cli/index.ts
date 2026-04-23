@@ -14,6 +14,11 @@ import { Orchestrator } from "../core/orchestrator";
 import { ConfigReportService } from "../core/config-report";
 import { Doctor } from "../core/doctor";
 import { ArtifactHistoryService, HISTORY_KINDS } from "../core/history";
+import {
+  BatchPreflightReport,
+  PreflightService,
+  TaskPreflightReport
+} from "../core/preflight";
 import { PreviewService } from "../core/preview";
 import { PromptBuilder } from "../core/prompt-builder";
 import {
@@ -36,6 +41,7 @@ interface Context {
   batch: BatchRunnerService;
   doctor: Doctor;
   preview: PreviewService;
+  preflight: PreflightService;
   history: ArtifactHistoryService;
   configReport: ConfigReportService;
   validation: ValidationService;
@@ -118,9 +124,15 @@ function createContext(
     new Router(config),
     new PromptBuilder()
   );
+  const validation = new ValidationService(config);
+  const preflight = new PreflightService(
+    config,
+    registry,
+    new Router(config),
+    validation
+  );
   const history = new ArtifactHistoryService(config);
   const configReport = new ConfigReportService(config, resolvedConfigPath);
-  const validation = new ValidationService(config);
   const doctor = new Doctor(config, registry);
 
   return {
@@ -131,6 +143,7 @@ function createContext(
     batch,
     doctor,
     preview,
+    preflight,
     history,
     configReport,
     validation,
@@ -173,6 +186,54 @@ function printBatchRunReport(report: BatchRunReport): void {
     }
     if (result.error) {
       console.log(`  error: ${result.error}`);
+    }
+  }
+}
+
+function printTaskPreflightReport(report: TaskPreflightReport): void {
+  console.log(`status: ${report.status}`);
+  console.log(`taskId: ${report.task.id}`);
+  console.log(`taskType: ${report.task.type}`);
+  console.log(`availableAgents: ${report.availableAgents}`);
+  console.log(`orderedAgents: ${report.route.orderedAgents.join(" -> ") || "(none)"}`);
+  if (report.artifactPath) {
+    console.log(`artifactPath: ${report.artifactPath}`);
+  }
+  for (const reason of report.reasons) {
+    console.log(`reason: ${reason}`);
+  }
+  for (const action of report.recommendedActions) {
+    console.log(`nextAction: ${action}`);
+  }
+}
+
+function printBatchPreflightReport(report: BatchPreflightReport): void {
+  console.log(`status: ${report.status}`);
+  console.log(`planFile: ${report.planFilePath}`);
+  console.log(
+    `summary: ready=${report.summary.readyTasks} warning=${report.summary.warningTasks} blocked=${report.summary.blockedTasks} total=${report.summary.totalTasks}`
+  );
+  if (report.artifactPath) {
+    console.log(`artifactPath: ${report.artifactPath}`);
+  }
+  for (const reason of report.reasons) {
+    console.log(`reason: ${reason}`);
+  }
+  for (const action of report.recommendedActions) {
+    console.log(`nextAction: ${action}`);
+  }
+  for (const task of report.tasks) {
+    console.log(`${task.label ?? path.basename(task.taskFilePath)}: ${task.status}`);
+    console.log(`  taskFile: ${task.taskFilePath}`);
+    if (task.taskType) {
+      console.log(`  taskType: ${task.taskType}`);
+    }
+    if (task.route) {
+      console.log(`  orderedAgents: ${task.route.orderedAgents.join(" -> ") || "(none)"}`);
+    }
+    console.log(`  availableAgents: ${task.availableAgents}`);
+    for (const reason of task.reasons) {
+      console.log(`  reason: ${reason}`);
     }
   }
 }
@@ -625,8 +686,99 @@ program
   });
 
 program
+  .command("preflight")
+  .description("Run validation plus route-readiness checks for a task or batch plan.")
+  .option("--task <type>", `Task type: ${TASK_TYPES.join(", ")}`)
+  .option("--task-file <path>", "Load a full task definition from a JSON/YAML file.")
+  .option("--plan-file <path>", "Load a JSON/YAML batch plan file for batch preflight.")
+  .option("--agent <name>", `Preferred agent or auto`)
+  .option("--fallback <agents...>", "Fallback agents in order.")
+  .option("--cwd <path>", "Base working directory.", process.cwd())
+  .option("--title <text>", "Optional task title.")
+  .option("--prompt <text>", "Prompt text supplied directly.")
+  .option("--input-file <path>", "Read prompt text from a file.")
+  .option("--timeout-ms <ms>", "Task-level timeout override.")
+  .option("--skip-detect", "Skip live agent detection and only inspect config/routing.")
+  .option("--fail-on-blocked", "Exit with code 1 when preflight status is blocked.")
+  .option("-c, --config <path>", "Path to a JSON/YAML config file.")
+  .option("--json", "Print JSON output.")
+  .action(async (options: {
+    task?: string;
+    taskFile?: string;
+    planFile?: string;
+    agent?: string;
+    fallback?: string[];
+    cwd: string;
+    title?: string;
+    prompt?: string;
+    inputFile?: string;
+    timeoutMs?: string;
+    skipDetect?: boolean;
+    failOnBlocked?: boolean;
+    config?: string;
+    json?: boolean;
+  }) => {
+    const cwd = path.resolve(options.cwd);
+    const context = createContext(options.config, cwd, Boolean(options.json));
+
+    if (options.planFile && (options.task || options.taskFile || options.prompt || options.inputFile)) {
+      throw new Error(
+        "Use --plan-file by itself, or use task/task-file inputs for task preflight."
+      );
+    }
+
+    const includeDetection = !options.skipDetect;
+    if (options.planFile) {
+      const plan = loadBatchPlan(options.planFile, cwd);
+      const report = await context.preflight.inspectBatch(plan, {
+        includeDetection,
+        artifactCwd: cwd
+      });
+
+      if (options.json) {
+        printJson(report);
+      } else {
+        printBatchPreflightReport(report);
+      }
+
+      if (options.failOnBlocked && report.status === "blocked") {
+        process.exitCode = 1;
+      }
+      return;
+    }
+
+    const { task, taskFilePath } = await buildTaskFromCliOptions({
+      task: options.task,
+      taskFile: options.taskFile,
+      agent: options.agent,
+      fallback: options.fallback,
+      cwd: options.cwd,
+      title: options.title,
+      timeoutMs: options.timeoutMs,
+      prompt: options.prompt,
+      inputFile: options.inputFile,
+      requirePrompt: true
+    });
+    const report = await context.preflight.inspectTask(task, {
+      taskFilePath,
+      includeDetection,
+      artifactCwd: cwd
+    });
+
+    if (options.json) {
+      printJson(report);
+    } else {
+      printTaskPreflightReport(report);
+    }
+
+    if (options.failOnBlocked && report.status === "blocked") {
+      process.exitCode = 1;
+    }
+  });
+
+program
   .command("history")
-  .description("List recent doctor, preview, validation, batch, and run artifacts.")
+  .description("List recent doctor, preview, preflight, validation, batch, and run artifacts.")
   .option("--cwd <path>", "Base working directory.", process.cwd())
   .option(
     "--kind <kind>",
