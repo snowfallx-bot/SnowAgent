@@ -43,6 +43,12 @@ describe("BatchRunnerService", () => {
         return {
           taskId: "task-1",
           success: true,
+          task: {
+            id: "task-1",
+            type: "summarize",
+            prompt: "Summarize this issue.",
+            cwd: tempDir
+          },
           selectedAgent: "copilot",
           route: {
             taskId: "task-1",
@@ -139,6 +145,12 @@ describe("BatchRunnerService", () => {
         return {
           taskId: "task-1",
           success: true,
+          task: {
+            id: "task-1",
+            type: "summarize",
+            prompt: "Summarize this issue.",
+            cwd: tempDir
+          },
           selectedAgent: "copilot",
           route: {
             taskId: "task-1",
@@ -210,6 +222,12 @@ describe("BatchRunnerService", () => {
           return {
             taskId: "task-1",
             success: false,
+            task: {
+              id: "task-1",
+              type: "summarize",
+              prompt: "Summarize this issue.",
+              cwd: tempDir
+            },
             route: {
               taskId: "task-1",
               taskType: "summarize",
@@ -228,6 +246,12 @@ describe("BatchRunnerService", () => {
         return {
           taskId: "task-2",
           success: true,
+          task: {
+            id: "task-2",
+            type: "review",
+            prompt: "Summarize this issue.",
+            cwd: tempDir
+          },
           selectedAgent: "copilot",
           route: {
             taskId: "task-2",

@@ -127,10 +127,28 @@ describe("Orchestrator", () => {
     const result = await orchestrator.run(task);
 
     expect(result.success).toBe(true);
+    expect(result.task).toEqual({
+      id: "fallback-test",
+      type: "fix",
+      title: "Fallback behavior",
+      prompt: "Fix the fallback workflow",
+      cwd: tempRoot,
+      fallbackAgents: []
+    });
     expect(result.selectedAgent).toBe("qwen");
     expect(result.attempts).toHaveLength(2);
     expect(result.attempts[0]?.agentName).toBe("codex");
     expect(result.attempts[1]?.agentName).toBe("qwen");
+
+    const savedResultPath = path.join(
+      result.artifactDir,
+      "orchestration-result.json"
+    );
+    const savedResult = JSON.parse(fs.readFileSync(savedResultPath, "utf8")) as {
+      task?: Task;
+    };
+
+    expect(savedResult.task?.type).toBe("fix");
+    expect(savedResult.task?.prompt).toBe("Fix the fallback workflow");
   });
 });
-

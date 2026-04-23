@@ -20,6 +20,7 @@ export interface OrchestrationAttempt {
 export interface OrchestrationResult {
   taskId: string;
   success: boolean;
+  task: Task;
   selectedAgent?: AgentName;
   route: RouteDecision;
   attempts: OrchestrationAttempt[];
@@ -31,6 +32,14 @@ export interface OrchestrationResult {
 
 function sanitizePathToken(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]/gu, "-");
+}
+
+function toTaskSnapshot(task: Task, taskId: string): Task {
+  return {
+    ...task,
+    id: taskId,
+    fallbackAgents: [...(task.fallbackAgents ?? [])]
+  };
 }
 
 export class Orchestrator {
@@ -45,6 +54,7 @@ export class Orchestrator {
   public async run(task: Task, options?: { dryRun?: boolean }): Promise<OrchestrationResult> {
     const startedAt = new Date().toISOString();
     const taskId = task.id || randomUUID();
+    const taskSnapshot = toTaskSnapshot(task, taskId);
     const prompt = this.promptBuilder.build(task);
     const route = this.router.select(task);
     const artifactDir = path.resolve(
@@ -106,6 +116,7 @@ export class Orchestrator {
         const orchestrationResult: OrchestrationResult = {
           taskId,
           success: true,
+          task: taskSnapshot,
           selectedAgent: agentName,
           route,
           attempts,
@@ -127,6 +138,7 @@ export class Orchestrator {
     const failedResult: OrchestrationResult = {
       taskId,
       success: false,
+      task: taskSnapshot,
       route,
       attempts,
       prompt,
@@ -142,4 +154,3 @@ export class Orchestrator {
     return failedResult;
   }
 }
-
