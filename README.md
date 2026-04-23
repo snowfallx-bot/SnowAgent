@@ -28,7 +28,7 @@
 - 规则路由与 fallback
 - 结构化输出解析：支持 JSON / JSON 数组 / JSONL / `===RESULT_JSON===` / Markdown JSON code block，并会继续尝试从事件 envelope 中提取最终结构化内容
 - YAML / JSON 配置与 `zod` 校验
-- 本地 CLI 入口：`list` / `config` / `detect` / `doctor` / `route` / `prompt` / `history` / `validate` / `batch` / `run`
+- 本地 CLI 入口：`list` / `config` / `detect` / `doctor` / `route` / `prompt` / `history` / `validate` / `batch` / `retry` / `run`
 - 基础单元测试，包含 `child_process.spawn` mock
 
 ## 目录结构
@@ -85,6 +85,7 @@ node .\dist\cli\index.js prompt --task summarize --input-file .\demo\issue.txt -
 node .\dist\cli\index.js history --limit 10
 node .\dist\cli\index.js validate --task-file .\demo\summarize.task.yaml
 node .\dist\cli\index.js batch --plan-file .\demo\demo.batch.yaml --dry-run
+node .\dist\cli\index.js retry --latest-failed --dry-run
 node .\dist\cli\index.js run --task summarize --input-file .\demo\issue.txt --cwd .
 ```
 
@@ -100,6 +101,7 @@ node ./dist/cli/index.js prompt --task summarize --input-file ./demo/issue.txt -
 node ./dist/cli/index.js history --kind preview --json
 node ./dist/cli/index.js validate --plan-file ./demo/demo.batch.yaml --json
 node ./dist/cli/index.js batch --plan-file ./demo/demo.batch.yaml --dry-run --json
+node ./dist/cli/index.js retry --latest-failed --dry-run --json
 node ./dist/cli/index.js run --task review --input-file ./demo/review.diff.txt --cwd .
 ```
 
@@ -144,6 +146,7 @@ node .\dist\cli\index.js prompt --task summarize --input-file .\demo\issue.txt -
 node .\dist\cli\index.js history --kind preview --limit 5 --json
 node .\dist\cli\index.js validate --task-file .\demo\summarize.task.yaml --plan-file .\demo\demo.batch.yaml --json
 node .\dist\cli\index.js batch --plan-file .\demo\demo.batch.yaml --dry-run --json
+node .\dist\cli\index.js retry --report-file .\artifacts\batches\batch-demo.batch-123.json --dry-run --json
 node .\dist\cli\index.js run --task-file .\demo\summarize.task.yaml --dry-run --json
 ```
 
@@ -444,6 +447,22 @@ tasks:
 
 批量汇总报告默认会写到执行 `cwd` 对应的 `artifacts/batches/` 下，这样可以直接配合 `history --kind batch` 回看。
 如果批量中有失败项，还会额外生成一个 `retry-*.yaml` 重跑计划，只保留失败任务，方便第二轮继续执行。
+
+### `retry`
+
+直接执行失败重跑计划。它可以直接吃 `retry-*.yaml`，也可以从 batch 报告里自动解析 `retryPlanPath`，或者直接选择最近一次失败批次。
+
+```powershell
+node .\dist\cli\index.js retry --retry-plan .\artifacts\batches\retry-demo.batch-123.yaml --dry-run
+node .\dist\cli\index.js retry --report-file .\artifacts\batches\batch-demo.batch-123.json --dry-run --json
+node .\dist\cli\index.js retry --latest-failed --fail-on-error
+```
+
+这个命令适合：
+
+- 批量任务失败后，直接从最新失败记录继续
+- 不手工打开 batch JSON 查 `retryPlanPath`
+- 把第二轮重跑也继续纳入同样的 batch artifact 流程
 
 ### `run`
 
