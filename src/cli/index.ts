@@ -1248,6 +1248,7 @@ program
   .option("--agent <name>", `Filter history-backed artifact kinds by selected agent: ${AGENT_NAMES.join(", ")}`)
   .option("--older-than-days <days>", "Only prune artifacts older than this many days.")
   .option("--keep-latest <count>", "Always retain the newest N matching artifacts.")
+  .option("--fail-on-match", "Exit with code 1 when any prune candidate matches the current rules.")
   .option("--apply", "Actually delete matched artifacts. Without this flag, the command is dry-run.")
   .option("-c, --config <path>", "Path to a JSON/YAML config file.")
   .option("--json", "Print JSON output.")
@@ -1259,6 +1260,7 @@ program
     agent?: string;
     olderThanDays?: string;
     keepLatest?: string;
+    failOnMatch?: boolean;
     apply?: boolean;
     config?: string;
     json?: boolean;
@@ -1282,10 +1284,16 @@ program
 
     if (options.json) {
       printJson(report);
+      if (options.failOnMatch && report.matchedUnitCount > 0) {
+        process.exitCode = 1;
+      }
       return;
     }
 
     printArtifactPruneReport(report);
+    if (options.failOnMatch && report.matchedUnitCount > 0) {
+      process.exitCode = 1;
+    }
   });
 
 program
