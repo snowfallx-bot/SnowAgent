@@ -13,6 +13,13 @@ import {
   ArtifactInspectionReport,
   ArtifactInspector
 } from "../core/artifact-inspector";
+import {
+  ARTIFACT_FILTER_KINDS,
+  ArtifactInventoryReport,
+  ArtifactMaintenanceService,
+  ArtifactPruneReport,
+  PRUNABLE_ARTIFACT_KINDS
+} from "../core/artifact-maintenance";
 import { BatchRunReport, BatchRunnerService, loadBatchPlan } from "../core/batch";
 import { Orchestrator } from "../core/orchestrator";
 import { ConfigReportService } from "../core/config-report";
@@ -53,6 +60,7 @@ interface Context {
   preflight: PreflightService;
   history: ArtifactHistoryService;
   inspector: ArtifactInspector;
+  artifacts: ArtifactMaintenanceService;
   configReport: ConfigReportService;
   validation: ValidationService;
   logger: Logger;
@@ -143,6 +151,7 @@ function createContext(
   );
   const history = new ArtifactHistoryService(config);
   const inspector = new ArtifactInspector(config);
+  const artifacts = new ArtifactMaintenanceService(config);
   const configReport = new ConfigReportService(config, resolvedConfigPath);
   const doctor = new Doctor(config, registry);
 
@@ -157,6 +166,7 @@ function createContext(
     preflight,
     history,
     inspector,
+    artifacts,
     configReport,
     validation,
     logger
@@ -369,6 +379,74 @@ function printArtifactInspectionReport(report: ArtifactInspectionReport): void {
   console.log(`topLevelKeys: ${report.topLevelKeys.join(", ") || "(none)"}`);
 }
 
+function printArtifactInventoryReport(report: ArtifactInventoryReport): void {
+  console.log(`rootDir: ${report.rootDir}`);
+  console.log(`filter: ${report.filter}`);
+  if (report.filters.status) {
+    console.log(`statusFilter: ${report.filters.status}`);
+  }
+  if (report.filters.taskId) {
+    console.log(`taskIdFilter: ${report.filters.taskId}`);
+  }
+  if (report.filters.selectedAgent) {
+    console.log(`agentFilter: ${report.filters.selectedAgent}`);
+  }
+  console.log(
+    `rootTotals: files=${report.totalRootFileCount} bytes=${report.totalRootSizeBytes}`
+  );
+  console.log(
+    `matchedTotals: units=${report.matchedUnitCount} files=${report.matchedFileCount} bytes=${report.matchedSizeBytes}`
+  );
+  for (const kind of report.kinds) {
+    console.log(`${kind.kind}: units=${kind.unitCount} files=${kind.fileCount} bytes=${kind.totalSizeBytes}`);
+    if (kind.newestCreatedAt) {
+      console.log(`  newest: ${kind.newestCreatedAt}`);
+    }
+    if (kind.newestPath) {
+      console.log(`  path: ${kind.newestPath}`);
+    }
+  }
+}
+
+function printArtifactPruneReport(report: ArtifactPruneReport): void {
+  console.log(`rootDir: ${report.rootDir}`);
+  console.log(`filter: ${report.filter}`);
+  console.log(`dryRun: ${report.dryRun}`);
+  if (report.filters.status) {
+    console.log(`statusFilter: ${report.filters.status}`);
+  }
+  if (report.filters.taskId) {
+    console.log(`taskIdFilter: ${report.filters.taskId}`);
+  }
+  if (report.filters.selectedAgent) {
+    console.log(`agentFilter: ${report.filters.selectedAgent}`);
+  }
+  if (report.rules.olderThanDays !== undefined) {
+    console.log(`olderThanDays: ${report.rules.olderThanDays}`);
+  }
+  if (report.rules.keepLatest !== undefined) {
+    console.log(`keepLatest: ${report.rules.keepLatest}`);
+  }
+  console.log(
+    `matchedTotals: units=${report.matchedUnitCount} files=${report.matchedFileCount} reclaimableBytes=${report.reclaimableBytes}`
+  );
+  for (const candidate of report.candidates) {
+    console.log(`${candidate.kind}: ${candidate.createdAt}`);
+    console.log(`  primaryPath: ${candidate.primaryPath}`);
+    console.log(`  files: ${candidate.fileCount}`);
+    console.log(`  bytes: ${candidate.sizeBytes}`);
+    if (candidate.status) {
+      console.log(`  status: ${candidate.status}`);
+    }
+    if (candidate.taskId) {
+      console.log(`  taskId: ${candidate.taskId}`);
+    }
+    if (candidate.selectedAgent) {
+      console.log(`  selectedAgent: ${candidate.selectedAgent}`);
+    }
+  }
+}
+
 function parseAgentName(input: string): AgentName {
   if ((AGENT_NAMES as readonly string[]).includes(input)) {
     return input as AgentName;
@@ -400,6 +478,26 @@ function parsePositiveInteger(input: string, label: string): number {
   }
 
   return parsed;
+}
+
+function parseArtifactFilterKind(input: string): (typeof ARTIFACT_FILTER_KINDS)[number] {
+  if ((ARTIFACT_FILTER_KINDS as readonly string[]).includes(input)) {
+    return input as (typeof ARTIFACT_FILTER_KINDS)[number];
+  }
+
+  throw new Error(
+    `Unsupported artifact kind "${input}". Expected one of: ${ARTIFACT_FILTER_KINDS.join(", ")}`
+  );
+}
+
+function parsePrunableArtifactKind(input: string): (typeof PRUNABLE_ARTIFACT_KINDS)[number] {
+  if ((PRUNABLE_ARTIFACT_KINDS as readonly string[]).includes(input)) {
+    return input as (typeof PRUNABLE_ARTIFACT_KINDS)[number];
+  }
+
+  throw new Error(
+    `Unsupported prunable artifact kind "${input}". Expected one of: ${PRUNABLE_ARTIFACT_KINDS.join(", ")}`
+  );
 }
 
 function buildTaskFromCliOptions(options: {
@@ -1069,6 +1167,101 @@ program
     }
 
     printArtifactInspectionReport(report);
+  });
+
+program
+  .command("artifacts")
+  .description("Summarize artifact storage by kind, size, and newest entry.")
+  .option("--cwd <path>", "Base working directory.", process.cwd())
+  .option(
+    "--kind <kind>",
+    `Artifact summary filter: ${ARTIFACT_FILTER_KINDS.join(", ")}`,
+    "all"
+  )
+  .option("--status <status>", "Filter history-backed artifact kinds by status.")
+  .option("--task-id <text>", "Filter history-backed artifact kinds by taskId substring.")
+  .option("--agent <name>", `Filter history-backed artifact kinds by selected agent: ${AGENT_NAMES.join(", ")}`)
+  .option("-c, --config <path>", "Path to a JSON/YAML config file.")
+  .option("--json", "Print JSON output.")
+  .action((options: {
+    cwd: string;
+    kind: string;
+    status?: string;
+    taskId?: string;
+    agent?: string;
+    config?: string;
+    json?: boolean;
+  }) => {
+    const cwd = path.resolve(options.cwd);
+    const context = createContext(options.config, cwd, Boolean(options.json));
+    const report = context.artifacts.summarize({
+      cwd,
+      kind: parseArtifactFilterKind(options.kind),
+      status: options.status,
+      taskId: options.taskId,
+      selectedAgent: options.agent ? parseAgentName(options.agent) : undefined
+    });
+
+    if (options.json) {
+      printJson(report);
+      return;
+    }
+
+    printArtifactInventoryReport(report);
+  });
+
+program
+  .command("prune-artifacts")
+  .description("Dry-run or apply artifact cleanup rules such as keep-latest and age thresholds.")
+  .option("--cwd <path>", "Base working directory.", process.cwd())
+  .option(
+    "--kind <kind>",
+    `Prunable artifact kind: ${PRUNABLE_ARTIFACT_KINDS.join(", ")}`,
+    "all"
+  )
+  .option("--status <status>", "Filter history-backed artifact kinds by status before pruning.")
+  .option("--task-id <text>", "Filter history-backed artifact kinds by taskId substring before pruning.")
+  .option("--agent <name>", `Filter history-backed artifact kinds by selected agent: ${AGENT_NAMES.join(", ")}`)
+  .option("--older-than-days <days>", "Only prune artifacts older than this many days.")
+  .option("--keep-latest <count>", "Always retain the newest N matching artifacts.")
+  .option("--apply", "Actually delete matched artifacts. Without this flag, the command is dry-run.")
+  .option("-c, --config <path>", "Path to a JSON/YAML config file.")
+  .option("--json", "Print JSON output.")
+  .action((options: {
+    cwd: string;
+    kind: string;
+    status?: string;
+    taskId?: string;
+    agent?: string;
+    olderThanDays?: string;
+    keepLatest?: string;
+    apply?: boolean;
+    config?: string;
+    json?: boolean;
+  }) => {
+    const cwd = path.resolve(options.cwd);
+    const context = createContext(options.config, cwd, Boolean(options.json));
+    const report = context.artifacts.prune({
+      cwd,
+      kind: parsePrunableArtifactKind(options.kind),
+      status: options.status,
+      taskId: options.taskId,
+      selectedAgent: options.agent ? parseAgentName(options.agent) : undefined,
+      olderThanDays: options.olderThanDays
+        ? parsePositiveInteger(options.olderThanDays, "older-than-days")
+        : undefined,
+      keepLatest: options.keepLatest
+        ? parsePositiveInteger(options.keepLatest, "keep-latest")
+        : undefined,
+      apply: Boolean(options.apply)
+    });
+
+    if (options.json) {
+      printJson(report);
+      return;
+    }
+
+    printArtifactPruneReport(report);
   });
 
 program
