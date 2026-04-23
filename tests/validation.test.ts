@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { DEFAULT_CONFIG } from "../src/config/schema";
 import { ValidationService } from "../src/core/validation";
 import { writeTextFile } from "../src/utils/fs";
 
@@ -68,5 +69,26 @@ describe("ValidationService", () => {
 
     expect(result.valid).toBe(false);
     expect(result.summary).toContain("missing task files");
+  });
+
+  it("persists validation reports when artifacts are enabled", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "snowagent-validate-report-"));
+    const service = new ValidationService(DEFAULT_CONFIG);
+
+    const report = service.buildReport(
+      [
+        {
+          kind: "config",
+          valid: true,
+          summary: "Config file is valid."
+        }
+      ],
+      {
+        artifactCwd: tempDir
+      }
+    );
+
+    expect(report.artifactPath).toBeDefined();
+    expect(report.artifactPath && fs.existsSync(report.artifactPath)).toBe(true);
   });
 });

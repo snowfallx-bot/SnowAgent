@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { AppConfig } from "../config/schema";
+import { writeJsonFile } from "../utils/fs";
 import { loadBatchPlan } from "./batch";
 import { loadTaskFile } from "./task-file";
 import { loadConfig, resolveConfigPath } from "../config/load-config";
@@ -20,6 +22,7 @@ export interface ValidationReport {
   generatedAt: string;
   allValid: boolean;
   results: ValidationResult[];
+  artifactPath?: string;
 }
 
 function formatError(error: unknown): string {
@@ -31,6 +34,8 @@ function summarizeTaskPromptLength(prompt: string | undefined): number {
 }
 
 export class ValidationService {
+  public constructor(private readonly config?: AppConfig) {}
+
   public validateConfig(configPath: string | undefined, cwd: string): ValidationResult {
     try {
       const resolvedPath = configPath
@@ -135,11 +140,30 @@ export class ValidationService {
     }
   }
 
-  public buildReport(results: ValidationResult[]): ValidationReport {
-    return {
+  public buildReport(
+    results: ValidationResult[],
+    options?: { artifactCwd?: string }
+  ): ValidationReport {
+    const report: ValidationReport = {
       generatedAt: new Date().toISOString(),
       allValid: results.every((result) => result.valid),
       results
     };
+
+    if (!this.config?.artifacts.saveOutputs || !options?.artifactCwd) {
+      return report;
+    }
+
+    const artifactPath = path.resolve(
+      options.artifactCwd,
+      this.config.artifacts.rootDir,
+      "validation",
+      `validate-${Date.now()}.json`
+    );
+
+    report.artifactPath = artifactPath;
+    writeJsonFile(artifactPath, report);
+
+    return report;
   }
 }
