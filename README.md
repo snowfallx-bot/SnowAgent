@@ -28,7 +28,7 @@
 - 规则路由与 fallback
 - 结构化输出解析：支持 JSON / JSON 数组 / JSONL / `===RESULT_JSON===` / Markdown JSON code block，并会继续尝试从事件 envelope 中提取最终结构化内容
 - YAML / JSON 配置与 `zod` 校验
-- 本地 CLI 入口：`list` / `config` / `detect` / `doctor` / `route` / `prompt` / `history` / `validate` / `batch` / `retry` / `run`
+- 本地 CLI 入口：`list` / `config` / `detect` / `doctor` / `route` / `prompt` / `preflight` / `history` / `validate` / `batch` / `retry` / `run`
 - 基础单元测试，包含 `child_process.spawn` mock
 
 ## 目录结构
@@ -82,6 +82,7 @@ node .\dist\cli\index.js detect
 node .\dist\cli\index.js doctor
 node .\dist\cli\index.js route --task fix --cwd . --detect
 node .\dist\cli\index.js prompt --task summarize --input-file .\demo\issue.txt --cwd .
+node .\dist\cli\index.js preflight --task-file .\demo\summarize.task.yaml
 node .\dist\cli\index.js history --limit 10
 node .\dist\cli\index.js validate --task-file .\demo\summarize.task.yaml
 node .\dist\cli\index.js batch --plan-file .\demo\demo.batch.yaml --dry-run
@@ -98,6 +99,7 @@ node ./dist/cli/index.js detect
 node ./dist/cli/index.js doctor --json
 node ./dist/cli/index.js route --task review --cwd . --json
 node ./dist/cli/index.js prompt --task summarize --input-file ./demo/issue.txt --cwd . --json
+node ./dist/cli/index.js preflight --plan-file ./demo/demo.batch.yaml --json
 node ./dist/cli/index.js history --kind preview --json
 node ./dist/cli/index.js validate --plan-file ./demo/demo.batch.yaml --json
 node ./dist/cli/index.js batch --plan-file ./demo/demo.batch.yaml --dry-run --json
@@ -143,6 +145,7 @@ node .\dist\cli\index.js doctor --agent qwen --smoke --fail-on-unhealthy
 node .\dist\cli\index.js config --agent copilot --json
 node .\dist\cli\index.js route --task review --agent codex --cwd . --detect --json
 node .\dist\cli\index.js prompt --task summarize --input-file .\demo\issue.txt --cwd . --json
+node .\dist\cli\index.js preflight --task-file .\demo\review.task.yaml --json
 node .\dist\cli\index.js history --kind preview --limit 5 --json
 node .\dist\cli\index.js validate --task-file .\demo\summarize.task.yaml --plan-file .\demo\demo.batch.yaml --json
 node .\dist\cli\index.js batch --plan-file .\demo\demo.batch.yaml --dry-run --json
@@ -383,11 +386,12 @@ node .\dist\cli\index.js prompt --task-file .\demo\summarize.task.yaml --json
 
 ### `history`
 
-查看 `artifacts/` 目录里的最近产物，包括 doctor 报告、route/prompt 预览和实际运行结果。
+查看 `artifacts/` 目录里的最近产物，包括 doctor 报告、route/prompt 预览、preflight、validation 和实际运行结果。
 
 ```powershell
 node .\dist\cli\index.js history
 node .\dist\cli\index.js history --kind preview --limit 5 --json
+node .\dist\cli\index.js history --kind preflight --limit 5 --json
 node .\dist\cli\index.js history --kind validation --limit 5 --json
 node .\dist\cli\index.js history --kind batch --limit 5 --json
 node .\dist\cli\index.js history --kind run --limit 10
@@ -395,9 +399,25 @@ node .\dist\cli\index.js history --kind run --limit 10
 
 这个命令适合：
 
-- 快速回看最近一次 smoke / preview / validation / batch / run 发生了什么
+- 快速回看最近一次 smoke / preview / preflight / validation / batch / run 发生了什么
 - 不手动翻目录，直接定位对应 artifact 路径
-- 在脚本里提取最近的 doctor / preview / validation / batch / run 记录
+- 在脚本里提取最近的 doctor / preview / preflight / validation / batch / run 记录
+
+### `preflight`
+
+把输入校验和路由可用性检查合成一份“执行前体检”报告，适合在真正 `run` / `batch` / `retry` 前先看一次。
+
+```powershell
+node .\dist\cli\index.js preflight --task-file .\demo\summarize.task.yaml
+node .\dist\cli\index.js preflight --task review --input-file .\demo\review.diff.txt --cwd . --json
+node .\dist\cli\index.js preflight --plan-file .\demo\demo.batch.yaml --fail-on-blocked
+```
+
+这个命令适合：
+
+- 在无人值守执行前，先确认 task 或 batch 有没有被输入问题直接卡死
+- 预先看到路由链上有哪些 agent 当前可用，哪些只能靠 fallback
+- 把执行前状态保存到 `artifacts/preflight/*.json`，方便后续 `history` 回看
 
 ### `validate`
 
@@ -529,6 +549,7 @@ PromptBuilder 会要求 agent 输出：
 
 - `session-*.log`
 - `doctor/*.json`
+- `preflight/*.json`
 - `validation/*.json`
 - `previews/*.json`
 - `previews/*.txt`
