@@ -85,9 +85,9 @@ node .\dist\cli\index.js prompt --task summarize --input-file .\demo\issue.txt -
 node .\dist\cli\index.js preflight --task-file .\demo\summarize.task.yaml
 node .\dist\cli\index.js history --limit 10
 node .\dist\cli\index.js validate --task-file .\demo\summarize.task.yaml
-node .\dist\cli\index.js batch --plan-file .\demo\demo.batch.yaml --dry-run
+node .\dist\cli\index.js batch --plan-file .\demo\demo.batch.yaml --dry-run --preflight
 node .\dist\cli\index.js retry --latest-failed --dry-run
-node .\dist\cli\index.js run --task summarize --input-file .\demo\issue.txt --cwd .
+node .\dist\cli\index.js run --task summarize --input-file .\demo\issue.txt --cwd . --preflight
 ```
 
 PowerShell 7.x：
@@ -102,9 +102,9 @@ node ./dist/cli/index.js prompt --task summarize --input-file ./demo/issue.txt -
 node ./dist/cli/index.js preflight --plan-file ./demo/demo.batch.yaml --json
 node ./dist/cli/index.js history --kind preview --json
 node ./dist/cli/index.js validate --plan-file ./demo/demo.batch.yaml --json
-node ./dist/cli/index.js batch --plan-file ./demo/demo.batch.yaml --dry-run --json
-node ./dist/cli/index.js retry --latest-failed --dry-run --json
-node ./dist/cli/index.js run --task review --input-file ./demo/review.diff.txt --cwd .
+node ./dist/cli/index.js batch --plan-file ./demo/demo.batch.yaml --dry-run --preflight --json
+node ./dist/cli/index.js retry --latest-failed --dry-run --preflight --json
+node ./dist/cli/index.js run --task review --input-file ./demo/review.diff.txt --cwd . --preflight
 ```
 
 如果你把包全局链接或安装成 bin，也可以直接运行：
@@ -148,9 +148,9 @@ node .\dist\cli\index.js prompt --task summarize --input-file .\demo\issue.txt -
 node .\dist\cli\index.js preflight --task-file .\demo\review.task.yaml --json
 node .\dist\cli\index.js history --kind preview --limit 5 --json
 node .\dist\cli\index.js validate --task-file .\demo\summarize.task.yaml --plan-file .\demo\demo.batch.yaml --json
-node .\dist\cli\index.js batch --plan-file .\demo\demo.batch.yaml --dry-run --json
-node .\dist\cli\index.js retry --report-file .\artifacts\batches\batch-demo.batch-123.json --dry-run --json
-node .\dist\cli\index.js run --task-file .\demo\summarize.task.yaml --dry-run --json
+node .\dist\cli\index.js batch --plan-file .\demo\demo.batch.yaml --dry-run --preflight --json
+node .\dist\cli\index.js retry --report-file .\artifacts\batches\batch-demo.batch-123.json --dry-run --preflight --json
+node .\dist\cli\index.js run --task-file .\demo\summarize.task.yaml --dry-run --preflight --json
 ```
 
 5. 再跑 demo：
@@ -444,7 +444,7 @@ node .\dist\cli\index.js validate --plan-file .\demo\demo.batch.yaml --fail-on-e
 
 ```powershell
 node .\dist\cli\index.js batch --plan-file .\demo\demo.batch.yaml --dry-run
-node .\dist\cli\index.js batch --plan-file .\demo\demo.batch.yaml --dry-run --json
+node .\dist\cli\index.js batch --plan-file .\demo\demo.batch.yaml --dry-run --preflight --json
 node .\dist\cli\index.js batch --plan-file .\demo\demo.batch.yaml --fail-on-error
 ```
 
@@ -467,6 +467,8 @@ tasks:
 
 批量汇总报告默认会写到执行 `cwd` 对应的 `artifacts/batches/` 下，这样可以直接配合 `history --kind batch` 回看。
 如果批量中有失败项，还会额外生成一个 `retry-*.yaml` 重跑计划，只保留失败任务，方便第二轮继续执行。
+如果你加上 `--preflight`，批量在真正执行前会先生成一份 `preflight` 报告；当状态是 `blocked` 时会直接停止，避免无人值守时白跑一轮。
+如果你希望更严格一点，还可以再加 `--fail-on-preflight-warning`，把降级到 fallback 的情况也当成失败。
 
 ### `retry`
 
@@ -474,7 +476,7 @@ tasks:
 
 ```powershell
 node .\dist\cli\index.js retry --retry-plan .\artifacts\batches\retry-demo.batch-123.yaml --dry-run
-node .\dist\cli\index.js retry --report-file .\artifacts\batches\batch-demo.batch-123.json --dry-run --json
+node .\dist\cli\index.js retry --report-file .\artifacts\batches\batch-demo.batch-123.json --dry-run --preflight --json
 node .\dist\cli\index.js retry --latest-failed --fail-on-error
 ```
 
@@ -484,6 +486,9 @@ node .\dist\cli\index.js retry --latest-failed --fail-on-error
 - 不手工打开 batch JSON 查 `retryPlanPath`
 - 把第二轮重跑也继续纳入同样的 batch artifact 流程
 
+和 `batch` 一样，`retry` 也支持 `--preflight`；如果最新失败任务已经明显处于 `blocked` 状态，会在真正重跑前直接拦住。
+同样也支持 `--fail-on-preflight-warning`，适合你只想在“完全 ready”时才继续第二轮重跑。
+
 ### `run`
 
 执行标准任务。
@@ -491,8 +496,8 @@ node .\dist\cli\index.js retry --latest-failed --fail-on-error
 ```powershell
 node .\dist\cli\index.js run --task summarize --input-file .\demo\issue.txt --cwd .
 node .\dist\cli\index.js run --task review --prompt "review this diff" --agent codex --cwd .
-node .\dist\cli\index.js run --task fix --input-file .\demo\bug.txt --agent auto --cwd . --dry-run
-node .\dist\cli\index.js run --task-file .\demo\fix.task.yaml --dry-run --json
+node .\dist\cli\index.js run --task fix --input-file .\demo\bug.txt --agent auto --cwd . --dry-run --preflight
+node .\dist\cli\index.js run --task-file .\demo\fix.task.yaml --dry-run --preflight --json
 ```
 
 可用参数：
@@ -506,6 +511,8 @@ node .\dist\cli\index.js run --task-file .\demo\fix.task.yaml --dry-run --json
 - `--timeout-ms <ms>`
 - `--json`
 - `--dry-run`
+
+如果你加上 `--preflight`，`run` 会先检查当前任务输入和路由 agent 状态；默认在 `blocked` 时直接停止，配合 `--fail-on-preflight-warning` 还可以把 `warning` 也当成失败。
 
 带 `--json` 时，CLI 会抑制运行日志的标准输出污染，只保留最终 JSON 结果，方便后续脚本或 webhook 消费。
 
