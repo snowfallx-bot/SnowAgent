@@ -47,6 +47,7 @@ import {
   RetentionService
 } from "../core/retention";
 import { Router } from "../core/router";
+import { StatusReport, StatusService } from "../core/status";
 import { loadTaskFile, writeTaskFile } from "../core/task-file";
 import { AGENT_NAMES, AgentName, TASK_TYPES, Task } from "../core/task";
 import { ValidationService } from "../core/validation";
@@ -67,6 +68,7 @@ interface Context {
   inspector: ArtifactInspector;
   artifacts: ArtifactMaintenanceService;
   retention: RetentionService;
+  status: StatusService;
   configReport: ConfigReportService;
   validation: ValidationService;
   logger: Logger;
@@ -161,6 +163,14 @@ function createContext(
   const retention = new RetentionService(config);
   const configReport = new ConfigReportService(config, resolvedConfigPath);
   const doctor = new Doctor(config, registry);
+  const status = new StatusService(
+    config,
+    doctor,
+    validation,
+    artifacts,
+    retention,
+    history
+  );
 
   return {
     config,
@@ -175,6 +185,7 @@ function createContext(
     inspector,
     artifacts,
     retention,
+    status,
     configReport,
     validation,
     logger
@@ -515,6 +526,55 @@ function printRetentionExecutionReport(report: RetentionExecutionReport): void {
       console.log(`  matchedUnits: ${result.prune.matchedUnitCount}`);
       console.log(`  reclaimableBytes: ${result.prune.reclaimableBytes} (${formatByteSize(result.prune.reclaimableBytes)})`);
     }
+  }
+}
+
+function printStatusReport(report: StatusReport): void {
+  console.log(`status: ${report.summary.status}`);
+  console.log(`cwd: ${report.cwd}`);
+  console.log(`smokeEnabled: ${report.smokeEnabled}`);
+  if (report.artifactPath) {
+    console.log(`artifactPath: ${report.artifactPath}`);
+  }
+  console.log(
+    `config: ${report.configValidation.valid ? "valid" : "invalid"}${report.configValidation.path ? ` path=${report.configValidation.path}` : ""}`
+  );
+  console.log(
+    `doctor: status=${report.summary.doctorStatus} healthy=${report.doctor.summary.healthyAgents} warning=${report.doctor.summary.warningAgents} unhealthy=${report.doctor.summary.unhealthyAgents}`
+  );
+  console.log(
+    `artifacts: units=${report.summary.artifactUnitCount} bytes=${report.summary.artifactBytes} (${formatByteSize(report.summary.artifactBytes)})`
+  );
+  console.log(
+    `retentionPreview: matches=${report.summary.retentionMatches} policies=${report.retentionPreview.executedPolicies}`
+  );
+  console.log(
+    `recentFailures: runs=${report.summary.failedRuns} batches=${report.summary.failedBatches}`
+  );
+
+  for (const action of report.summary.recommendedActions) {
+    console.log(`nextAction: [${action.category}] ${action.message}`);
+    if (action.command) {
+      console.log(`  command: ${action.command}`);
+    }
+    if (action.configPath) {
+      console.log(`  configPath: ${action.configPath}`);
+    }
+    if (action.artifactPath) {
+      console.log(`  artifactPath: ${action.artifactPath}`);
+    }
+  }
+
+  for (const entry of report.recentFailures.runs) {
+    console.log(`failedRun: ${entry.createdAt}`);
+    console.log(`  path: ${entry.path}`);
+    console.log(`  summary: ${entry.summary}`);
+  }
+
+  for (const entry of report.recentFailures.batches) {
+    console.log(`failedBatch: ${entry.createdAt}`);
+    console.log(`  path: ${entry.path}`);
+    console.log(`  summary: ${entry.summary}`);
   }
 }
 
@@ -889,6 +949,49 @@ program
     if (options.failOnUnhealthy && report.summary.status !== "healthy") {
       process.exitCode = 1;
     }
+  });
+
+program
+  .command("status")
+  .description(
+    "Collect one operational snapshot across config validity, doctor health, artifact storage, retention preview, and recent failures."
+  )
+  .option("-c, --config <path>", "Path to a JSON/YAML config file.")
+  .option("--cwd <path>", "Base working directory.", process.cwd())
+  .option("--agent <name>", `Limit doctor checks to one agent: ${AGENT_NAMES.join(", ")}`)
+  .option("--smoke", "Include live doctor smoke checks for the selected agents.")
+  .option("--timeout-ms <ms>", "Smoke test timeout override.")
+  .option("--failure-limit <count>", "How many recent failed run/batch artifacts to include.", "3")
+  .option("--json", "Print JSON output.")
+  .action(async (options: {
+    config?: string;
+    cwd: string;
+    agent?: string;
+    smoke?: boolean;
+    timeoutMs?: string;
+    failureLimit?: string;
+    json?: boolean;
+  }) => {
+    const cwd = path.resolve(options.cwd);
+    const context = createContext(options.config, cwd, Boolean(options.json));
+    const agentNames = options.agent ? [parseAgentName(options.agent)] : undefined;
+    const report = await context.status.inspect({
+      cwd,
+      configPath: options.config,
+      smoke: Boolean(options.smoke),
+      agentNames,
+      timeoutMs: options.timeoutMs ? Number(options.timeoutMs) : undefined,
+      failureLimit: options.failureLimit
+        ? parsePositiveInteger(options.failureLimit, "failure-limit")
+        : undefined
+    });
+
+    if (options.json) {
+      printJson(report);
+      return;
+    }
+
+    printStatusReport(report);
   });
 
 program
