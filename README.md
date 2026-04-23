@@ -28,7 +28,7 @@
 - 规则路由与 fallback
 - 结构化输出解析：支持 JSON / JSON 数组 / JSONL / `===RESULT_JSON===` / Markdown JSON code block，并会继续尝试从事件 envelope 中提取最终结构化内容
 - YAML / JSON 配置与 `zod` 校验
-- 本地 CLI 入口：`list` / `config` / `detect` / `doctor` / `route` / `prompt` / `history` / `inspect` / `artifacts` / `prune-artifacts` / `retention` / `apply-retention` / `export-task` / `preflight` / `validate` / `batch` / `retry` / `rerun` / `run`
+- 本地 CLI 入口：`list` / `config` / `detect` / `doctor` / `status` / `route` / `prompt` / `history` / `inspect` / `artifacts` / `prune-artifacts` / `retention` / `apply-retention` / `export-task` / `preflight` / `validate` / `batch` / `retry` / `rerun` / `run`
 - 基础单元测试，包含 `child_process.spawn` mock
 
 ## 目录结构
@@ -80,6 +80,7 @@ node .\dist\cli\index.js list
 node .\dist\cli\index.js config --agent codex
 node .\dist\cli\index.js detect
 node .\dist\cli\index.js doctor
+node .\dist\cli\index.js status
 node .\dist\cli\index.js route --task fix --cwd . --detect
 node .\dist\cli\index.js prompt --task summarize --input-file .\demo\issue.txt --cwd .
 node .\dist\cli\index.js preflight --task-file .\demo\summarize.task.yaml
@@ -104,6 +105,7 @@ node ./dist/cli/index.js list
 node ./dist/cli/index.js config --json
 node ./dist/cli/index.js detect
 node ./dist/cli/index.js doctor --json
+node ./dist/cli/index.js status --json
 node ./dist/cli/index.js route --task review --cwd . --json
 node ./dist/cli/index.js prompt --task summarize --input-file ./demo/issue.txt --cwd . --json
 node ./dist/cli/index.js preflight --plan-file ./demo/demo.batch.yaml --json
@@ -156,6 +158,7 @@ node .\dist\cli\index.js detect --json
 node .\dist\cli\index.js doctor --json
 node .\dist\cli\index.js doctor --agent copilot --smoke --json
 node .\dist\cli\index.js doctor --agent qwen --smoke --fail-on-unhealthy
+node .\dist\cli\index.js status --json
 node .\dist\cli\index.js config --agent copilot --json
 node .\dist\cli\index.js route --task review --agent codex --cwd . --detect --json
 node .\dist\cli\index.js prompt --task summarize --input-file .\demo\issue.txt --cwd . --json
@@ -213,6 +216,10 @@ artifacts:
   saveLogs: true
 
 retention:
+  status:
+    enabled: true
+    olderThanDays: 14
+    keepLatest: 30
   preview:
     enabled: true
     olderThanDays: 14
@@ -394,6 +401,27 @@ node .\dist\cli\index.js doctor --agent qwen --smoke --fail-on-unhealthy
 - 加 `--fail-on-unhealthy` 后，可以直接把 `doctor` 当成 CI / 脚本的健康检查入口
 - 当 `doctor` 发现问题时，会在终端、JSON 和 `artifacts/doctor/*.json` 里同时给出下一步修复建议
 
+### `status`
+
+生成一份面向运维的一键快照，把 config 校验、doctor 健康、artifact 占用、retention 预览和最近失败记录合并到同一份报告里。
+
+```powershell
+node .\dist\cli\index.js status
+node .\dist\cli\index.js status --json
+node .\dist\cli\index.js status --agent codex --smoke --json
+```
+
+这个命令适合：
+
+- 你离开电脑前，先快速确认系统当前是不是适合继续无人值守运行
+- 不想分别跑 `doctor`、`artifacts`、`apply-retention` dry-run、`history` 时，直接看一份聚合结论
+- 把最近失败的 `run` / `batch` 记录和下一步动作一起沉淀到 `artifacts/status/*.json`
+
+说明：
+
+- `status` 内部会静默复用 doctor、artifact 盘点和 retention 预览逻辑，但不会额外生成一堆 doctor / maintenance 子报告
+- 生成的 `status` 报告可以直接通过 `history --kind status` 和 `inspect --latest --kind status` 回看
+
 ### `route`
 
 预览某个任务会如何排 agent 顺序，而不真正执行任何 CLI。
@@ -428,11 +456,12 @@ node .\dist\cli\index.js prompt --task-file .\demo\summarize.task.yaml --json
 
 ### `history`
 
-查看 `artifacts/` 目录里的最近产物，包括 doctor 报告、route/prompt 预览、preflight、validation、maintenance 报告和实际运行结果。
+查看 `artifacts/` 目录里的最近产物，包括 doctor/status 报告、route/prompt 预览、preflight、validation、maintenance 报告和实际运行结果。
 
 ```powershell
 node .\dist\cli\index.js history
 node .\dist\cli\index.js history --kind preview --limit 5 --json
+node .\dist\cli\index.js history --kind status --limit 5 --json
 node .\dist\cli\index.js history --kind preflight --limit 5 --json
 node .\dist\cli\index.js history --kind validation --limit 5 --json
 node .\dist\cli\index.js history --kind maintenance --limit 5 --json
@@ -444,10 +473,10 @@ node .\dist\cli\index.js history --kind run --task-id demo --limit 3
 
 这个命令适合：
 
-- 快速回看最近一次 smoke / preview / preflight / validation / maintenance / batch / run 发生了什么
+- 快速回看最近一次 smoke / status / preview / preflight / validation / maintenance / batch / run 发生了什么
 - 回看最近一次 artifact 盘点、按规则清理或 retention 执行做了什么
 - 不手动翻目录，直接定位对应 artifact 路径
-- 在脚本里提取最近的 doctor / preview / preflight / validation / maintenance / batch / run 记录
+- 在脚本里提取最近的 doctor / status / preview / preflight / validation / maintenance / batch / run 记录
 - 用 `--status` / `--task-id` / `--agent` 把列表快速缩到你关心的那一类记录
 
 ### `inspect`
@@ -456,6 +485,7 @@ node .\dist\cli\index.js history --kind run --task-id demo --limit 3
 
 ```powershell
 node .\dist\cli\index.js inspect --artifact .\artifacts\some-task\orchestration-result.json
+node .\dist\cli\index.js inspect --latest --kind status --json
 node .\dist\cli\index.js inspect --latest --kind run --json
 node .\dist\cli\index.js inspect --latest --kind batch --index 2
 node .\dist\cli\index.js inspect --latest --kind maintenance --json
@@ -464,7 +494,7 @@ node .\dist\cli\index.js inspect --latest --kind run --status failed --agent cod
 
 这个命令适合：
 
-- 直接从最新 run / batch / preflight / doctor 结果里看详细上下文
+- 直接从最新 run / batch / preflight / doctor / status 结果里看详细上下文
 - 直接展开最新一次 artifact 盘点、清理或 retention 报告
 - 不自己打开 JSON 文件，也能快速知道 artifact 里有没有 task snapshot
 - 配合 `history` 先看列表，再用 `inspect` 展开第 N 条
@@ -492,6 +522,7 @@ node .\dist\cli\index.js export-task --latest-failed --output-file .\exports\lat
 
 ```powershell
 node .\dist\cli\index.js artifacts
+node .\dist\cli\index.js artifacts --kind status --json
 node .\dist\cli\index.js artifacts --kind run --json
 node .\dist\cli\index.js artifacts --kind all --status success --agent qwen --json
 ```
@@ -545,7 +576,7 @@ node .\dist\cli\index.js retention --kind log --json
 
 这个命令适合：
 
-- 快速确认默认或自定义配置到底会如何保留 `doctor` / `preview` / `preflight` / `run` / `batch` / `validation` / `maintenance` / `log`
+- 快速确认默认或自定义配置到底会如何保留 `doctor` / `status` / `preview` / `preflight` / `run` / `batch` / `validation` / `maintenance` / `log`
 - 在真正清理前，看某一类策略是否启用、保留条数和天数是不是符合预期
 - 配合 `config` 一起排查为什么某些 artifact 一直被保留或一直被清掉
 
@@ -747,6 +778,7 @@ PromptBuilder 会要求 agent 输出：
 
 - `session-*.log`
 - `doctor/*.json`
+- `status/*.json`
 - `preflight/*.json`
 - `validation/*.json`
 - `maintenance/*.json`

@@ -17,6 +17,10 @@ retention:
     enabled: true
     olderThanDays: 30
     keepLatest: 20
+  status:
+    enabled: true
+    olderThanDays: 14
+    keepLatest: 30
   preview:
     enabled: true
     olderThanDays: 14
